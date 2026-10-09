@@ -6,6 +6,7 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import { requestIdMiddleware } from './common/request-id.middleware';
 import { jsonBodyMiddleware } from './common/json-body.middleware';
 import { validateEnvironment } from './config/configuration';
+import { configureSwagger } from './config/swagger';
 
 export async function createApplication(): Promise<NestExpressApplication> {
   // Validate before importing the dynamic ConfigModule or opening a listener.
@@ -31,5 +32,6 @@ export function configureApplication(app: NestExpressApplication): void {
   app.use(requestIdMiddleware);
   app.use(jsonBodyMiddleware);
   app.useGlobalPipes(new ZodValidationPipe());
+  configureSwagger(app);
   app.enableShutdownHooks();
 }

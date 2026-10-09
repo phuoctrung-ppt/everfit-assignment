@@ -1,6 +1,7 @@
 saveExact: true
 strictPeerDependencies: true
 allowBuilds:
+  '@scarf/scarf': false
   '@nestjs/core': false
   '@parcel/watcher': false
   unrs-resolver: false

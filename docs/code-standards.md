@@ -1,6 +1,6 @@
 # Code Standards & Project Structure
 
-These standards apply to the Everfit Workout Logging API and its Codex-assisted development. They describe expectations for implementation; the workspace now includes the Phase 01 application foundation; business endpoints remain planned.
+These standards apply to the Everfit Workout Logging API and its Codex-assisted development. They describe expectations for implementation; the workspace includes the foundation and Phase 02 units/catalog; workout logging, history, and records remain planned.
 
 ## Project Context and Instructions
 

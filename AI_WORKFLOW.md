@@ -190,3 +190,20 @@ Current evidence:
 - Existing `/plans/` Git exclusion retained. Local plan/report updates record progress; application documentation and implementation changes are committed separately from the preexisting assignment PDF.
 
 Outstanding questions: video preparation/recording time remains unallocated; no Phase 01 implementation decision is outstanding.
+
+
+## 5. Phase 02 implementation session — 2026-10-09
+
+User requested Phase 02 execution using NestJS/database skills and development-only Swagger. Codex loaded the NestJS context builder and database indexing, Zod, and code-review guidance. Two bounded implementation agents handled units/contracts and catalog/seeding; the primary agent handled Swagger, dependency compatibility, integration, and documentation. An independent reviewer checked the combined implementation.
+
+Changes: decimal.js 10.6.0 with isolated 50-digit arithmetic; strict shared workout contracts; stable JSON catalog and atomic repeatable seed; catalog discovery/transaction-client lookup; Swagger 11.4.7 with Zod response schemas, enabled only in development. Published peer metadata excluded Swagger 12 because this project uses Nest 11. The optional Scarf install script is explicitly disabled, consistent with the existing build-script policy.
+
+Verification: conversion/schema tests first failed for absent implementation, then passed. Aggregate unit suite: 102 tests; PostgreSQL/HTTP integration: 41 tests. Lint, build, full TypeScript checking, and repeated host `pnpm db:seed` passed. Existing database-service formatting required a cosmetic correction for the lint gate. The Swagger environment test initially reused the ConfigModule import across simulated process modes; resetting the module registry before each bootstrap made each mode match a fresh process. Production and test docs/assets return 404; development serves UI/JSON.
+
+Index checks used 10,000 disposable catalog rows, 100 muscle groups, and 10,000 mappings with default planner settings and ANALYZE. EXPLAIN ANALYZE confirmed existing normalized-name and reverse mapping indexes for selective predicates. No new index or 50,000-workout-entry performance claim. Seed failures roll back, repeated seeds keep counts stable, and catalog renaming preserves historical exercise IDs.
+
+Host development exposes Swagger at `/docs`; Compose remains production, and the TypeScript seed CLI runs on the host with development dependencies. Phases 03–07 remain pending. No deployment or publishing performed.
+
+Independent Phase 02 review reproduced a Unicode normalization mismatch: JavaScript lowercased `İ Press` differently from PostgreSQL’s CHECK expression, so valid seed input failed. Migration 002 makes application normalization authoritative, backfills existing names, preserves unique indexing, and allows lowercase expansion beyond 200 characters in the normalized column. A real-database regression covers Turkish dotted I, Greek final sigma, an apostrophe during backfill, and a maximum-length expanding name.
+
+Reviewer rechecked the Unicode fix and found no remaining blockers. An independent collision probe confirmed that migration failure rolls back without merging catalog IDs or advancing the migration version.

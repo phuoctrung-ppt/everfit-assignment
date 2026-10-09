@@ -1,0 +1,31 @@
+{
+  "muscleGroups": [
+    { "id": "20000000-0000-4000-8000-000000000001", "name": "chest" },
+    { "id": "20000000-0000-4000-8000-000000000002", "name": "triceps" },
+    { "id": "20000000-0000-4000-8000-000000000003", "name": "quadriceps" },
+    { "id": "20000000-0000-4000-8000-000000000004", "name": "glutes" },
+    { "id": "20000000-0000-4000-8000-000000000005", "name": "hamstrings" }
+  ],
+  "exercises": [
+    {
+      "id": "10000000-0000-4000-8000-000000000001",
+      "name": "Bench Press",
+      "muscleGroups": ["chest", "triceps"]
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000002",
+      "name": "Squat",
+      "muscleGroups": ["quadriceps", "glutes"]
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000003",
+      "name": "Deadlift",
+      "muscleGroups": ["hamstrings", "glutes"]
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000004",
+      "name": "Push Up",
+      "muscleGroups": ["chest", "triceps"]
+    }
+  ]
+}

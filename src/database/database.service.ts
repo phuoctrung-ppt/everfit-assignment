@@ -14,7 +14,9 @@ export class DatabaseService implements OnApplicationShutdown {
       max: config.getOrThrow('DB_POOL_MAX', { infer: true }),
       connectionTimeoutMillis: 3000,
       idleTimeoutMillis: 30000,
-      statement_timeout: config.getOrThrow('DB_STATEMENT_TIMEOUT_MS', { infer: true }),
+      statement_timeout: config.getOrThrow('DB_STATEMENT_TIMEOUT_MS', {
+        infer: true,
+      }),
       lock_timeout: config.getOrThrow('DB_LOCK_TIMEOUT_MS', { infer: true }),
       options: '-c timezone=UTC',
     });

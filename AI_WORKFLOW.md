@@ -265,3 +265,16 @@ Verification: lint, Nest build, TypeScript, 171 unit tests, 121 integration test
 User wanted proof that the real service runs and visible performance output. Their local changes selected info level in the worker and report, but child stdout/stderr were still ignored. Preserved info as default, added validated PERF_LOG_LEVEL, inherited output, and printed actual isolated backend URL/PID. Debug level exposes safe WorkoutLoggingService started/completed/failed events; completion follows transaction commit. Counts, operation, outcome, duration and existing request ID are logged, excluding user IDs, idempotency keys, bodies and raw errors. Scenario summaries now include sampled RSS, post-GC heap, and throughput alongside p95/CPU.
 
 Applied NestJS logging guidance, security, and independent code review. Debug benchmark passed with 1,743 service starts, 1,243 completions and 500 expected scenario failures; checks confirmed no synthetic user IDs, keys, or body-field markers in logs. Report records debug level. Logging overhead is included; documentation preserves the historical silent baseline and distinguishes transaction duration from full HTTP latency. Build, TypeScript, lint, 171 unit tests, and 121 integration tests passed. Independent reviewer found no blockers.
+
+
+## 9. Phase 04 history session — 2026-10-09
+
+User requested `phase-04-history`. Applied NestJS context-builder, PostgreSQL, Zod, security, and code-review skills. Parent implemented history schema/cursor/controller/service/repository and shared mapper conversion; one bounded agent implemented real PostgreSQL/HTTP tests; a separate reviewer checked the combined feature and reran focused tests.
+
+History supports literal case-insensitive exercise substring, exact muscle group, open/inclusive/exclusive UTC ranges, output units, stable descending date/UUID pagination, complete ordered sets, and defined empty responses. Versioned cursor digest binds resource/user/normalized filters/unit while allowing page-size changes. Parameterized SQL escapes LIKE wildcard and escape characters; EXISTS prevents group duplication; entry pagination precedes bounded set retrieval. Existing Zod response serialization and sanitized database errors apply.
+
+Initial 41 schema/cursor tests failed for absent implementation, then passed. Integration tests landed after implementation, so no integration RED claimed. Lint identified a type-only import; the test agent corrected a fixture union type. Independent reviewer found no blocking or important issues and reran 41 unit plus 52 history/Swagger integration tests.
+
+Final verification: lint, Nest build, full TypeScript checking, 212 unit tests (13 suites), and 170 PostgreSQL/HTTP integration tests (21 suites) passed. Phase adds 49 integration cases plus Swagger assertions, covering tied pages/full sets, mixed-unit originals, filters and cursor binding, user isolation, concurrent inserts, strict inputs, literal SQL-looking text, and real lock timeout/recovery. No dependencies or migrations added. History performance remains Phase 06; nonsnapshot traversal documented. Existing Compose edit, assignment PDF, and prior AI_WORKFLOW deletion preserved; local plans remain Git-excluded.
+
+Unresolved questions: none for Phase 04.

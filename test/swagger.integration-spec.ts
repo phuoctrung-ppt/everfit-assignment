@@ -79,6 +79,38 @@ describe('development API documentation', () => {
         'application/json'
       ].schema.$ref,
     ).toContain('ErrorResponseDto');
+    const history = result.body.paths['/users/{userId}/workout-entries'].get;
+    expect(history.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'userId', in: 'path', required: true }),
+        ...[
+          'exerciseName',
+          'muscleGroup',
+          'from',
+          'to',
+          'unit',
+          'limit',
+          'cursor',
+        ].map((name) =>
+          expect.objectContaining({ name, in: 'query', required: false }),
+        ),
+      ]),
+    );
+    const historyRef = history.responses['200'].content[
+      'application/json'
+    ].schema.$ref
+      .split('/')
+      .at(-1);
+    expect(schemas[historyRef].properties.data.type).toBe('array');
+    expect(
+      schemas[historyRef].properties.pagination.properties.hasMore.type,
+    ).toBe('boolean');
+    expect(schemas[historyRef].properties.message).toBeDefined();
+    for (const status of ['400', '500', '503']) {
+      expect(
+        history.responses[status].content['application/json'].schema.$ref,
+      ).toContain('ErrorResponseDto');
+    }
     for (const suffix of ['', '/bulk']) {
       const logging =
         result.body.paths[`/users/{userId}/workout-entries${suffix}`].post;

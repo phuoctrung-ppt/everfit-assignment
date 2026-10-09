@@ -1,12 +1,14 @@
 import type { Exercise } from '../exercises/exercise.types';
 import type { WorkoutEntry } from '../../schemas/workout-response.schema';
 import { formatWeight } from '../../units/weight-conversion';
+import type { WeightUnit } from '../../units/unit-registry';
 import type { StoredWorkoutEntry, StoredWorkoutSet } from './logging.types';
 
 export function mapWorkoutEntry(
   entry: StoredWorkoutEntry,
   exercise: Exercise,
   sets: StoredWorkoutSet[],
+  unit: WeightUnit = 'kg',
 ): WorkoutEntry {
   return {
     id: entry.id,
@@ -24,8 +26,8 @@ export function mapWorkoutEntry(
         id: set.id,
         position: set.position,
         reps: set.reps,
-        weight: formatWeight(set.weight_kg, 'kg'),
-        unit: 'kg',
+        weight: formatWeight(set.weight_kg, unit),
+        unit,
         originalWeight: set.original_weight,
         originalUnit: set.original_unit,
       })),

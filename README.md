@@ -1,6 +1,6 @@
 # Everfit Workout Logging API
 
-Phase 03 adds atomic single/bulk workout logging with persistent idempotency to the NestJS/PostgreSQL API. Implemented endpoints: `GET /health`, `GET /exercises`, and both workout POST routes below. History and personal records remain planned.
+Phase 04 adds filtered, cursor-paginated workout history to the NestJS/PostgreSQL API. Implemented endpoints: `GET /health`, `GET /exercises`, single/bulk workout POST routes, and workout history GET. Personal records remain planned.
 
 ## Local startup
 
@@ -43,7 +43,7 @@ This changes the previous full-catalog contract: clients must follow `pagination
 
 Fixtures include Bench Press, Squat, Deadlift, and Push Up; zero weight is supported for every exercise. Exact lookup uses JavaScript trim/lowercase consistently for stored names and requests; internal whitespace and aliases remain distinct. Migration `002-catalog-name-normalization.cjs` backfills existing names and retains the unique index while removing PostgreSQL’s conflicting Unicode lowercase check. The normalized column is text to allow lowercase character expansion; display names remain limited to 200 characters.
 
-With `NODE_ENV=development` (the host default), Swagger UI is at [localhost:3000/docs](http://localhost:3000/docs), and OpenAPI JSON is at `/docs-json`. Both routes and Swagger assets are disabled in `test` and `production`. The committed Compose configuration uses production mode. For local Swagger, use host development or a local Compose override setting `NODE_ENV=development`; keep production mode for deployment. Documentation exposes health, catalog, and single/bulk logging endpoints, with request, required header, and response/error schemas. The catalog’s `ZodResponse` decorator and shared serializer also enforce its response contract at runtime. Add each later endpoint’s DTOs and response decorators alongside its implementation.
+With `NODE_ENV=development` (the host default), Swagger UI is at [localhost:3000/docs](http://localhost:3000/docs), and OpenAPI JSON is at `/docs-json`. Both routes and Swagger assets are disabled in `test` and `production`. The committed Compose configuration uses production mode. For local Swagger, use host development or a local Compose override setting `NODE_ENV=development`; keep production mode for deployment. Documentation exposes health, catalog, single/bulk logging, and history endpoints, with request, header, and response/error schemas. `ZodResponse` and the shared serializer enforce declared response contracts at runtime. Add each later endpoint’s DTOs and response decorators alongside its implementation.
 
 Pagination contracts live in `src/schemas/pagination.schema.ts`; the reusable Zod DTO is `src/common/cursor-pagination-query.dto.ts`. A route with feature filters extends `CursorPaginationQuerySchema` and creates its own Zod DTO: `ExerciseListQuerySchema` adds `muscleGroup`, so Swagger includes it alongside `limit` and optional `cursor`. Routes needing only pagination can use `CursorPaginationQueryDto` directly. A paginated route declares its query DTO and a concrete response DTO built from `CursorPageSchema(ItemSchema)`, then uses `@ZodResponse` for that DTO. The exercises service validates its own cursor resource/version/tuple and filter binding before querying. To opt out, use the route's ordinary query/response contracts and corresponding service read; there is no global pagination registration or Swagger parameter-hiding mechanism. `/health` declares no pagination DTO, has no cursor/limit parameters in Swagger, and returns its ordinary health response.
 
@@ -67,6 +67,30 @@ Each entry returns its UUID, `userId`, UTC `date`/`createdAt`, exercise `{id, na
 Keys are scoped to the user and shared across both POST routes, with no automatic expiry. Retry the same request with the same key: a matching request replays the committed 201 response, including original IDs and catalog metadata, after app restart or catalog rename. JSON object key order and numeric formatting do not affect matching; array order, string whitespace/casing, weight/unit, date spelling, and operation do. Different payloads or routes with the same user/key return 409. Distinct keys allow otherwise identical workouts.
 
 The service uses one READ COMMITTED transaction for reservation, catalog resolution, batched entry/set inserts, response validation, and replay storage. A unique `(user_id, key)` constraint coordinates concurrent clients. Replay is read in a separate statement after reservation contention resolves. All failures roll back; success returns only after commit. Lock/statement timeouts and transient connection failures return sanitized 503 without automatic write retries. If a connection fails around commit, reuse the same key to resolve the uncertain outcome. Idempotency keys, bodies, and raw errors are excluded from logs.
+
+## Workout history
+
+`GET /users/:userId/workout-entries` returns `{data: WorkoutEntry[], pagination: {nextCursor, hasMore}, message}`. It accepts optional `exerciseName`, `muscleGroup`, `from`, `to`, `unit`, `limit`, and `cursor`. No idempotency header is required.
+
+```sh
+curl --get http://localhost:3000/users/client-1/workout-entries \
+  --data-urlencode 'exerciseName=bench' \
+  --data-urlencode 'muscleGroup=chest' \
+  --data-urlencode 'from=2026-10-01T00:00:00Z' \
+  --data-urlencode 'to=2026-11-01T00:00:00Z' \
+  --data-urlencode 'unit=lb' \
+  --data-urlencode 'limit=20'
+```
+
+Exercise names use trimmed, case-insensitive literal substring matching (1–200 characters); `%`, `_`, backslash, and SQL-looking text are ordinary search characters. Muscle groups use trimmed, case-insensitive exact matching (1–80 characters). Both reject NUL. Filters compose and preserve each exercise's complete muscle-group list. Unknown names/groups return an empty 200 response. Ranges accept valid UTC `Z` timestamps through milliseconds: `from` is inclusive, `to` exclusive, either bound may be omitted, and both together require `from < to`. Unknown/duplicate parameters and invalid values return structured 400 errors.
+
+Weights default to `kg`; `unit=lb` converts from exact stored kg using the shared four-decimal rounding rule. Every set retains its six-decimal `originalWeight` and `originalUnit`. Results use current catalog names/groups; creation retries retain their original committed response metadata.
+
+Entries sort by workout date descending, then UUID descending. Default page size is 20, maximum 100. PostgreSQL selects at most `limit + 1` entries before one bounded follow-up query retrieves all ordered sets for the returned page. Multi-group exercises appear once; sets never split across pages. Empty results return `data: []`, `pagination: {nextCursor: null, hasMore: false}`, and `message: "No workout entries found for the requested filters."`; nonempty results use `message: null`.
+
+For subsequent pages, send `pagination.nextCursor` with the same user and normalized filters, including unit. Page size may change. Equivalent timestamp spellings bind to the same instant. Changing/removing filters requires starting without a cursor. Tokens are versioned base64url JSON, limited to 4,096 characters, with validated dates/UUIDs and a SHA-256 digest scoped to workout history. They are neither encrypted nor signed, and provide no authorization; the validated route user always scopes SQL.
+
+Traversal is not a snapshot. Concurrent entries newer than the cursor appear after refreshing the first page; backdated entries after the cursor may appear on later pages. Already-returned entries do not repeat under append-only writes. Catalog edits may change which entries match name/group filters during traversal. Representative history query timing and index tuning remain Phase 06 work.
 
 ## Configuration
 
@@ -100,7 +124,7 @@ Indexes support descending user history and user/exercise history, ordered sets,
 
 ## Health and errors
 
-`GET /exercises` and both logging POST routes translate known transient PostgreSQL/network connection and timeout failures to sanitized 503 responses; unexpected SQL/programming errors remain 500. No write retries are performed.
+`GET /exercises`, workout history GET, and both logging POST routes translate known transient PostgreSQL/network connection and timeout failures to sanitized 503 responses; unexpected SQL/programming errors remain 500. No write retries are performed.
 
 `GET /health` runs `SELECT 1`: 200 with `{"status":"ok"}`, or 503 when the database is unavailable. This checks database connectivity, not the catalog or migration version; Compose guarantees migration ordering.
 
@@ -130,7 +154,7 @@ pnpm test:integration --runInBand
 
 Integration tests require `TEST_DATABASE_ADMIN_URL` pointing to a dedicated local/test PostgreSQL server. They create random `everfit_test_<32 hex>` databases, apply migrations, and drop only their generated databases on cleanup. Never point this variable at a production server. No test uses the development database as its cleanup target.
 
-Tests cover configuration, startup failure, real database readiness, transaction rollback, exact NUMERIC values, session timeouts, schema constraints, repeated migration, rollback/reapply, and the HTTP validation/error boundary. Phase 02 adds exact conversion and schema boundary cases, catalog HTTP/lookup/seeding checks, and development-only Swagger checks. Catalog lookup reuses the unique B-tree index on `normalized_name`; joins reuse the mapping primary key and reverse index. EXPLAIN integration tests execute the repository SQL for single/multiple-name resolution and first/subsequent cursor pages over 10,000 exercises. The cursor queries use `exercises_cursor_idx` and return at most the requested lookahead page. HTTP tests cover traversal, page boundaries, Unicode cursors, concurrent inserts/deletes, and sanitized pagination validation. Phase 03 adds fingerprint identity, atomic single/bulk writes, indexed validation, exact stored values, persisted replay, conflicts, restart/catalog changes, concurrent writers, maximum request bounds, and repository/commit failure recovery tests. Phase 03 now has a separately runnable bulk performance harness loading more than 50,000 entries per user, measuring API CPU/memory and replay/rollback behavior. History/PR performance and production capacity remain unmeasured.
+Tests cover configuration, startup failure, real database readiness, transaction rollback, exact NUMERIC values, session timeouts, schema constraints, repeated migration, rollback/reapply, and the HTTP validation/error boundary. Phase 02 adds exact conversion and schema boundary cases, catalog HTTP/lookup/seeding checks, and development-only Swagger checks. Catalog lookup reuses the unique B-tree index on `normalized_name`; joins reuse the mapping primary key and reverse index. EXPLAIN integration tests execute the repository SQL for single/multiple-name resolution and first/subsequent cursor pages over 10,000 exercises. The cursor queries use `exercises_cursor_idx` and return at most the requested lookahead page. HTTP tests cover traversal, page boundaries, Unicode cursors, concurrent inserts/deletes, and sanitized pagination validation. Phase 03 adds fingerprint identity, atomic single/bulk writes, indexed validation, exact stored values, persisted replay, conflicts, restart/catalog changes, concurrent writers, maximum request bounds, and repository/commit failure recovery tests. Phase 03 now has a separately runnable bulk performance harness loading more than 50,000 entries per user, measuring API CPU/memory and replay/rollback behavior. Phase 04 adds strict history query/cursor tests and PostgreSQL coverage for filter composition, literal wildcard/SQL-looking search text, UTC boundaries, complete tied-date pagination, user/filter/unit cursor binding, changing page sizes, mixed-unit originals, concurrent inserts, and lock-timeout recovery. History/PR performance and production capacity remain unmeasured.
 
 For bulk CPU/memory screening, run `pnpm test:performance`; for visible service events, run `PERF_LOG_LEVEL=debug pnpm test:performance`; for a quiet extended soak, run `PERF_LOG_LEVEL=silent PERF_ROUNDS=30 pnpm test:performance`. The command creates and cleans up an isolated test database, loads 51,000 entries through HTTP, and writes a JSON report with latency, CPU/request, sampled RSS, retained-heap trend, and correctness checks. The startup banner prints its isolated backend port/PID. HTTP logs are visible by default (`info`); debug adds service start/completion/failure events without request bodies or keys. Metrics remain visible at every log level. It is excluded from routine Jest integration runs. See [bulk performance methodology and budgets](docs/bulk-performance.md). A finite soak can detect suspicious retained growth; it cannot prove absence of all memory leaks.
 

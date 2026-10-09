@@ -20,7 +20,12 @@ services:
     build: .
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-everfit}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-everfit}
-    command: ['node', 'scripts/migrate.cjs', 'up']
+    command:
+      [
+        'sh',
+        '-c',
+        'node scripts/migrate.cjs up && node dist-seed/scripts/seed-exercises.js',
+      ]
     depends_on:
       postgres:
         condition: service_healthy
@@ -29,7 +34,7 @@ services:
     init: true
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-everfit}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-everfit}
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DB_POOL_MAX: ${DB_POOL_MAX:-10}

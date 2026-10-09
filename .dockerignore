@@ -2,6 +2,10 @@
 .agents
 node_modules
 dist
+dist-seed
+artifacts
+.superpowers
+.worktrees
 coverage
 .env
 .env.*

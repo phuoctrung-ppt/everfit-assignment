@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "rootDir": ".", "outDir": "./dist-seed" },
+  "include": ["scripts/seed-exercises.ts", "scripts/seed-exercise-catalog.ts"],
+  "exclude": ["node_modules", "test", "dist", "dist-seed"]
+}

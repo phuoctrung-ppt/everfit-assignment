@@ -1,6 +1,20 @@
 # Everfit Workout Logging API
 
-The NestJS/PostgreSQL API supports exercise discovery, atomic workout logging, filtered history, and personal records with period comparisons. Phase 06 adds broader concurrency coverage and reproducible history/personal-record performance verification.
+The NestJS/PostgreSQL API supports exercise discovery, atomic workout logging, filtered history, and personal records with period comparisons. Includes concurrency and performance verification, automatic Docker initialization, and a public HTTP smoke check. [Delivery evidence](docs/delivery-verification.md), [AI workflow](AI_WORKFLOW.md), and the [19-minute video outline](docs/video-walkthrough-outline.md) accompany the implementation. The actual video recording and repository publication remain submission steps.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Client --> HTTP[NestJS controllers / Zod validation]
+    HTTP --> Services[Catalog / Logging / History / Records]
+    Services --> Units[Decimal conversion / response mapping]
+    Services --> SQL[Parameterized repositories]
+    SQL --> PG[(PostgreSQL)]
+    Init[One-shot migrations + catalog seed] --> PG
+```
+
+Controllers validate HTTP contracts; services own transactions and calculations; repositories own SQL. PostgreSQL provides atomic bulk writes, user/key uniqueness, relational constraints, and on-demand record selection. Direct `pg` queries keep those guarantees visible. There is no ORM, queue, cache, or authentication; the supplied user ID selects data and does not establish identity.
 
 ## Local startup
 
@@ -13,7 +27,7 @@ docker compose up --build -d
 curl http://localhost:3000/health
 ```
 
-Compose waits for PostgreSQL, runs migrations in a separate one-shot service, then starts the API as the non-root `node` user. PostgreSQL data lives in the named `postgres-data` volume. Both published ports bind to localhost. `docker compose down` retains data. Do not remove volumes unless their data is disposable.
+Compose waits for PostgreSQL, then its one-shot `migrate` service applies migrations and seeds the catalog before starting the API as the non-root `node` user. Both initialization and the API use the same image with production dependencies; the seed is compiled during the image build. PostgreSQL data lives in the named `postgres-data` volume. Both published ports bind to localhost; the database port is published for host development and integration tests. Remove that mapping when host database access is unnecessary. `docker compose down` retains data. Do not remove volumes unless their data is disposable.
 
 For host development, install Node **24.21.0** and pnpm **12.9.1**, then:
 
@@ -25,14 +39,22 @@ pnpm db:seed
 pnpm start:dev
 ```
 
+Verify every public feature after startup (requires the host Node/pnpm install above):
+
+```sh
+pnpm smoke --base-url http://localhost:3000
+```
+
+Smoke writes four entries under a new random `smoke-…` user; run against a disposable/local environment. It checks catalog, single/bulk logging, replay/conflict, rollback/key reuse, filtered history, pagination, unit conversion, records/comparison, malformed input, and empty ranges. See [delivery verification](docs/delivery-verification.md) for restart and isolated clean-start commands.
+
 For the compiled host application, use `pnpm build && pnpm start`. Scripts load `.env` using Node; existing environment variables take precedence. If changing `POSTGRES_PORT`, update both host URLs. Compose uses its internal PostgreSQL hostname and fixed port.
 
 ## Catalog and development Swagger
 
-Run `pnpm db:seed` after migrations to load `data/exercise-catalog.json` into the database selected by `DATABASE_URL`. The host seed command requires development dependencies (`ts-node`). For Docker startup, run it from the host after `pnpm install`; the production container does not run the TypeScript seed command. Seeding is transactional and repeatable. UUIDs are canonicalized before duplicate validation, so case-variant IDs cannot overwrite one another. NUL characters are rejected in exercise and muscle-group names. Stable exercise IDs preserve history; listed exercises receive the configured names and muscle-group mappings. Unlisted exercises and existing groups remain intact.
+Compose seeds automatically. For host development, run `pnpm db:seed` after migrations to load `data/exercise-catalog.json` into the database selected by `DATABASE_URL`. The host seed command requires development dependencies (`ts-node`); Docker runs the compiled copy. To repeat initialization without recreating API containers, use `docker compose run --rm migrate`. It reapplies catalog configuration and performs no workout deletion. Seeding is transactional and repeatable. UUIDs are canonicalized before duplicate validation, so case-variant IDs cannot overwrite one another. NUL characters are rejected in exercise and muscle-group names. Stable exercise IDs preserve history; listed exercises receive the configured names and muscle-group mappings. Unlisted exercises and existing groups remain intact.
 
 ```sh
-curl 'http://localhost:3000/exercises?muscleGroup=chest&limit=20'
+curl 'http://localhost:3000/exercises?muscleGroup=chest&limit=1'
 # Pass the returned pagination.nextCursor to fetch the next page:
 curl --get http://localhost:3000/exercises --data-urlencode 'muscleGroup=chest' --data-urlencode 'limit=20' --data-urlencode 'cursor=RETURNED_CURSOR'
 ```
@@ -43,7 +65,7 @@ This changes the previous full-catalog contract: clients must follow `pagination
 
 Fixtures include Bench Press, Squat, Deadlift, and Push Up; zero weight is supported for every exercise. Exact lookup uses JavaScript trim/lowercase consistently for stored names and requests; internal whitespace and aliases remain distinct. Migration `002-catalog-name-normalization.cjs` backfills existing names and retains the unique index while removing PostgreSQL’s conflicting Unicode lowercase check. The normalized column is text to allow lowercase character expansion; display names remain limited to 200 characters.
 
-With `NODE_ENV=development` (the host default), Swagger UI is at [localhost:3000/docs](http://localhost:3000/docs), and OpenAPI JSON is at `/docs-json`. Both routes and Swagger assets are disabled in `test` and `production`. The committed Compose configuration uses production mode. For local Swagger, use host development or a local Compose override setting `NODE_ENV=development`; keep production mode for deployment. Documentation exposes health, catalog, single/bulk logging, history, and personal-record endpoints, with request, header, and response/error schemas. `ZodResponse` and the shared serializer enforce declared response contracts at runtime. Add each later endpoint’s DTOs and response decorators alongside its implementation.
+With `NODE_ENV=development` (the host default), Swagger UI is at [localhost:3000/docs](http://localhost:3000/docs), and OpenAPI JSON is at `/docs-json`. Both routes and Swagger assets are disabled in `test` and `production`. Compose honors `NODE_ENV` from the environment or `.env`, defaulting to production when unset. The provided `.env.example` selects development for local Swagger; use `NODE_ENV=production docker compose up --build -d` to disable it. The clean delivery verification runs production mode. Documentation exposes health, catalog, single/bulk logging, history, and personal-record endpoints, with request, header, and response/error schemas. `ZodResponse` and the shared serializer enforce declared response contracts at runtime. Add each later endpoint’s DTOs and response decorators alongside its implementation.
 
 Pagination contracts live in `src/schemas/pagination.schema.ts`; the reusable Zod DTO is `src/common/cursor-pagination-query.dto.ts`. A route with feature filters extends `CursorPaginationQuerySchema` and creates its own Zod DTO: `ExerciseListQuerySchema` adds `muscleGroup`, so Swagger includes it alongside `limit` and optional `cursor`. Routes needing only pagination can use `CursorPaginationQueryDto` directly. A paginated route declares its query DTO and a concrete response DTO built from `CursorPageSchema(ItemSchema)`, then uses `@ZodResponse` for that DTO. The exercises service validates its own cursor resource/version/tuple and filter binding before querying. To opt out, use the route's ordinary query/response contracts and corresponding service read; there is no global pagination registration or Swagger parameter-hiding mechanism. `/health` declares no pagination DTO, has no cursor/limit parameters in Swagger, and returns its ordinary health response.
 
@@ -60,7 +82,18 @@ curl -X POST http://localhost:3000/users/client-1/workout-entries \
   -d '{"date":"2026-10-09T08:00:00Z","exerciseName":"Bench Press","sets":[{"reps":5,"weight":135,"unit":"lb"}]}'
 ```
 
-Each entry returns its UUID, `userId`, UTC `date`/`createdAt`, exercise `{id, name, muscleGroups}`, and ordered sets. Each set includes UUID, 1-based `position`, `reps`, `weight: "61.2350"`, `unit: "kg"`, `originalWeight: "135.000000"`, and `originalUnit: "lb"` for the example. Exact normalized kg remains internal. Seed the catalog first; lookup trims/lowercases names without changing stored fingerprints. Unknown exercises return 400 with indexed paths such as `entries.1.exerciseName`; nothing is written.
+Bulk example (all entries succeed or none do):
+
+```sh
+curl -X POST http://localhost:3000/users/client-1/workout-entries/bulk \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: workout-20261009-bulk-1' \
+  -d '{"entries":[{"date":"2026-10-01T08:00:00Z","exerciseName":"Bench Press","sets":[{"reps":8,"weight":60,"unit":"kg"}]},{"date":"2026-10-09T08:00:00Z","exerciseName":"Squat","sets":[{"reps":5,"weight":80,"unit":"kg"}]}]}'
+```
+
+Returns `201 {"data":[…]}` in request order, using the same entry shape as single logging. Replace an exercise with `Unknown Exercise` using a fresh key to receive 400 and verify history is unchanged. Repeat the original request/key to replay; change a weight with that key to receive `409 IDEMPOTENCY_CONFLICT`.
+
+Each entry returns its UUID, `userId`, UTC `date`/`createdAt`, exercise `{id, name, muscleGroups}`, and ordered sets. Each set includes UUID, 1-based `position`, `reps`, `weight: "61.2350"`, `unit: "kg"`, `originalWeight: "135.000000"`, and `originalUnit: "lb"` for the example. Exact normalized kg remains internal. The initialized catalog is required; lookup trims/lowercases names without changing stored fingerprints. Unknown exercises return 400 with indexed paths such as `entries.1.exerciseName`; nothing is written.
 
 `userId` is case-sensitive, 1–128 letters/digits/underscores/hyphens. Keys are case-sensitive, 1–128 printable non-whitespace ASCII characters. Duplicate key headers, malformed bodies, unknown fields, numeric strings, unsupported units, and exceeded limits return 400 before opening a transaction. Authentication remains outside assignment scope: a supplied user ID selects data; it is not proof of identity.
 
@@ -143,7 +176,17 @@ PostgreSQL fits the required relationships, atomic bulk operations, uniqueness c
 - `workout_sets` with ordered positions, reps, original `numeric(13,6)` weight/unit, and normalized `numeric(24,14)` kg.
 - `idempotency_requests` with a user/key primary key and committed response storage for replay.
 
-Indexes support descending user history and user/exercise history, ordered sets, and reverse muscle-group lookup. Foreign keys prevent catalog deletion from removing historical data. Constraints enforce bounds and uniqueness. Shared workout schemas validate supported units and decimal input precision for logging; PostgreSQL NUMERIC itself rounds excess scale.
+| Index / constraint                                               | Query or invariant                                         |
+| ---------------------------------------------------------------- | ---------------------------------------------------------- |
+| Entries `(user_id, performed_at DESC, id DESC)`                  | Stable descending history seek                             |
+| Entries `(user_id, exercise_id, performed_at DESC, id DESC)`     | Exact exercise/range filtering and record candidates       |
+| Sets unique `(entry_id, position)`                               | Ordered complete sets and no repeated position             |
+| Exercises unique `normalized_name`                               | Exact case-insensitive lookup                              |
+| `exercises_cursor_idx` on `(normalized_name COLLATE "C", id)`    | Catalog keyset traversal                                   |
+| Mapping primary key and reverse `(muscle_group_id, exercise_id)` | Complete groups and `EXISTS` filtering without duplication |
+| Idempotency primary key `(user_id, key)`                         | Concurrent reservation and persisted replay                |
+
+Foreign keys prevent catalog deletion from removing historical data. Constraints enforce bounds and uniqueness. Shared workout schemas validate supported units and decimal input precision for logging; PostgreSQL NUMERIC itself rounds excess scale.
 
 `pnpm db:migrate` applies pending migrations under the migration runner's lock/transaction; repeating it is a no-op. `pnpm db:rollback` permits only isolated `everfit_test_<32 hex>` database names. Never manually run destructive migration APIs against a database with valuable data.
 
@@ -151,7 +194,7 @@ Indexes support descending user history and user/exercise history, ordered sets,
 
 `GET /exercises`, workout history and personal-record GET routes, and both logging POST routes translate known transient PostgreSQL/network connection and timeout failures to sanitized 503 responses; unexpected SQL/programming errors remain 500. No write retries are performed.
 
-`GET /health` runs `SELECT 1`: 200 with `{"status":"ok"}`, or 503 when the database is unavailable. This checks database connectivity, not the catalog or migration version; Compose guarantees migration ordering.
+`GET /health` runs `SELECT 1`: 200 with `{"status":"ok"}`, or 503 when the database is unavailable. This checks database connectivity, not the catalog or migration version; Compose guarantees migration and seed ordering. SIGTERM/SIGINT invoke Nest shutdown hooks and close the PostgreSQL pool; Compose allows 15 seconds before forced termination.
 
 Every HTTP response gets a newly generated `x-request-id`. Client-provided IDs are ignored. Errors use:
 
@@ -166,7 +209,7 @@ Every HTTP response gets a newly generated `x-request-id`. Client-provided IDs a
 }
 ```
 
-Validation produces 400 `VALIDATION_ERROR` with `{path, message}` details. Invalid pagination values use the same sanitized `Invalid value` details as other validation failures; the global filter has no pagination-specific logic. JSON bodies over 1 MiB produce 413 `PAYLOAD_TOO_LARGE`; unsupported body encodings produce 415 `UNSUPPORTED_MEDIA_TYPE`; unexpected errors produce sanitized 500 `INTERNAL_ERROR`; unknown routes produce 404 `NOT_FOUND`. Logs are JSON, with request ID/status and no request bodies, headers, URLs, or raw database errors. Authentication is outside the assignment scope; localhost binding is appropriate for this development scaffold.
+Validation produces 400 `VALIDATION_ERROR` with `{path, message}` details. Invalid pagination values use the same sanitized `Invalid value` details as other validation failures; the global filter has no pagination-specific logic. JSON bodies over 1 MiB produce 413 `PAYLOAD_TOO_LARGE`; unsupported body encodings produce 415 `UNSUPPORTED_MEDIA_TYPE`; unexpected errors produce sanitized 500 `INTERNAL_ERROR`; unknown routes produce 404 `NOT_FOUND`. Logs are JSON, with request ID, status, and `responseTime` in milliseconds; no request bodies, headers, URLs, or raw database errors. Authentication is outside the assignment scope; localhost binding is appropriate for this development scaffold.
 
 ## Verification
 
@@ -204,4 +247,12 @@ Exact dependency versions are in `package.json` and `pnpm-lock.yaml`; image tags
 
 - [NestJS OpenAPI](https://docs.nestjs.com/openapi/introduction) and [nestjs-zod Swagger support](https://github.com/BenLorantfy/nestjs-zod): Swagger **11.4.7** matches Nest 11; `cleanupOpenApiDoc` processes the Zod DTO schemas. Swagger 12 requires Nest 12. decimal.js **10.6.0** provides isolated 50-digit arithmetic.
 
-The full intended API and numerical rules are in [the design](docs/workout-api-design.md). The remaining phase covers runtime and delivery hardening. At scale, first add authentication, retention policy, and measured pool/index tuning; caches and precomputed records require evidence.
+The full intended API and numerical rules are in [the design](docs/workout-api-design.md).
+
+## Scaling to 10,000 coaches and trade-offs
+
+The measured local p95 values are evidence for the documented dataset at concurrency 1, not proof of 10,000 concurrent clients. Convert coach activity into expected requests/second, read/write mix, data retention, and burst size; load-test that workload with latency/error budgets before sizing infrastructure.
+
+Stateless API replicas can share PostgreSQL and the idempotency table; uniqueness coordinates retries across processes. Budget the sum of replica connection pools against database capacity, apply admission control/rate limits, and use a pooler only after measuring connection pressure. Add authenticated tenant authorization before exposing real client data. Monitor request latency, lock waits, database CPU/I/O, pool saturation, and storage growth; exercise backups and restore.
+
+History reads stay page-bounded, while arbitrary-range records still scan matching sets. Tune indexes and queries against realistic cardinalities first. Read replicas require explicit read-after-write/replication-lag behavior. Caching needs user/filter/unit keys and invalidation; precomputed records cannot alone answer arbitrary periods. Idempotency responses grow indefinitely in this assignment: a future retention policy must define the retry window before pruning. Cursor traversal is not a snapshot, especially when catalog names change. These are documented next steps, not implemented production guarantees.

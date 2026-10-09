@@ -18,7 +18,8 @@
     "test:integration": "node --env-file-if-exists=.env node_modules/jest/bin/jest.js --config test/jest-integration.config.ts",
     "db:migrate": "node --env-file-if-exists=.env scripts/migrate.cjs up",
     "db:rollback": "node --env-file-if-exists=.env scripts/migrate.cjs down",
-    "db:seed": "node --env-file-if-exists=.env -r ts-node/register scripts/seed-exercises.ts"
+    "db:seed": "node --env-file-if-exists=.env -r ts-node/register scripts/seed-exercises.ts",
+    "smoke": "node -r ts-node/register scripts/smoke-api.ts"
   },
   "dependencies": {
     "@nestjs/common": "11.2.7",

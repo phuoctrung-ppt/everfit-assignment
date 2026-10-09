@@ -309,3 +309,47 @@ Verified run: all 999 responses correct; warm p95 history 3.90–7.79ms, all-tim
 Final checks: lint, Nest build, full TypeScript checking, 244 unit tests (17 suites), and 239 PostgreSQL integration tests (28 suites) passed after the SQL change. Existing environment/Compose/dependency/lockfile edits, prior workflow deletion, and assignment PDF preserved outside the phase commit. No push or deployment. Phase 07 remains planned.
 
 Unresolved questions: none.
+
+## 12. Phase 07 delivery evidence — 2026-10-09
+
+User requested “execute phase 07 delivery.” This section consolidates evidence for a fresh checkout. Earlier numbered sections are dated session records: statements such as “not implemented” or “planned” describe their session, not the final implementation. Existing unrelated working-tree edits remain outside the delivery commit.
+
+### Portable correction and rejection evidence
+
+| Actual correction or decision | Failure/weakness recorded during development | Shipped change and verifiable evidence |
+| --- | --- | --- |
+| Checked-out PostgreSQL client errors | Phase 01 reviewer and integration run observed an unhandled error when a transaction client lost its backend; pool-level listeners covered idle clients only. | [DatabaseService](src/database/database.service.ts) installs a scoped error listener and discards damaged clients. [Foundation integration test](test/foundation.integration-spec.ts), “discards a disconnected transaction client and permits subsequent work,” terminates its own backend and checks subsequent acquisition. Shipped in `b880c51`. |
+| Invalid URL refinement threw before sanitization | Phase 01 configuration cases exposed `Invalid URL` from `new URL()` after a failed Zod URL check. | [Environment schema](src/schemas/environment.schema.ts) guards with `URL.canParse()`. [Configuration tests](src/config/configuration.spec.ts) cover malformed URLs and secret-free errors. Shipped in `b880c51`. |
+| Benchmark secondary data could hide missing user scoping | Phase 06 review found secondary fixtures duplicated early primary data; the recorded fixture regression failed until other-user weights/dates were distinctive. | [Dataset generator](test/performance/read-dataset.ts) differentiates secondary records. [Oracle tests](test/performance/read-oracle.spec.ts), “makes cross-user contamination visible in recent history and monthly records,” assert those properties. Shipped in `efc6fc0`. |
+| Replay verification overpromised byte equality | Planning review found byte-equivalent JSON incompatible with JSONB object-key reordering. This was a specification correction, not a demonstrated failing endpoint. | [Design](docs/workout-api-design.md) promises status/JSON content equality; [idempotency tests](test/idempotency.integration-spec.ts) compare bodies deeply and accept object-key reordering. Runtime tests shipped in `6e6b680`. |
+| Rejected independent retries | User rejected treating retries as separate submissions because duplicate delivery must not create duplicate workouts. This was a rejected design option, not a production failure. | [Logging service](src/modules/workouts/workout-logging.service.ts), [idempotency repository](src/modules/workouts/idempotency.repository.ts), and [idempotency tests](test/idempotency.integration-spec.ts) implement persistent user-scoped replay, conflicts, restart behavior, and distinct-key legitimate entries. Shipped in `6e6b680`. |
+
+The first two rows are distinct implementation corrections; the third is a separate test-data correction. Historical failing terminal output and reviewer conversations are not committed artifacts. Earlier session notes report their red/green observations, while the tracked tests and corrected source establish the current behavior. Commits locate shipped changes; commit messages alone do not prove an independent review or preserve the intermediate broken version. Do not present a current passing test as a reproduction of a historical failure.
+
+Fresh focused check during Phase 07 documentation work:
+
+```sh
+pnpm test:unit --runInBand src/config/configuration.spec.ts test/performance/read-oracle.spec.ts
+```
+
+Observed: **23 tests across 2 suites passed**, exit 0, 2026-10-09 09:49 UTC. Full runtime and integration verification is recorded separately in [delivery verification](docs/delivery-verification.md). Historical Phase 06 performance misses and the resulting SQL correction remain described in [read performance](docs/read-performance.md), with tracked runner/oracle sources and explicit limits on access to Git-excluded raw reports.
+
+To inspect the shipped evidence without local plans:
+
+```sh
+git show b880c51:src/database/database.service.ts
+git show b880c51:src/schemas/environment.schema.ts
+git show 6e6b680:test/idempotency.integration-spec.ts
+git show efc6fc0:test/performance/read-oracle.spec.ts
+git log --oneline
+```
+
+Prompt/context strategy remains explicit task scope, repository rules, approved design, bounded delegation, and an independent review before completion claims. The delivery work uses actual runtime checks and source/test evidence; it does not invent missing red output or historical approvals. Existing `plans/` remains Git-excluded, so this ledger links tracked implementation and tests directly.
+
+The [19-minute English walkthrough outline](docs/video-walkthrough-outline.md) covers architecture, API edge cases, these corrections, code explanation, and scaling assumptions. Recording and publication are separate handoff work. No actual video has been supplied; no repository remote was configured at the documentation check.
+
+Runtime results: clean Compose applied three migrations and seeded four exercises; 35-request smoke passed. Saved replay/history matched after restart and repeat initialization. Database outage yielded sanitized 503 responses and recovered. Shutdown took 0.291 seconds with no remaining database sessions. Lint/build/TypeScript, 244 unit tests, and 239 real PostgreSQL integration tests passed. README and video demo commands ran against the isolated instance. Only the owned delivery containers/network/volume were removed; the normal development database remained healthy.
+
+Independent final review found no Critical/Important issues. Corrected three minor findings: compare smoke error request IDs with the current response header, repair README table formatting, and document saved-state restart commands. Reviewer reproduced acceptance of a stale request ID; a focused adversarial check then confirmed rejection after the fix, followed by a successful full HTTP smoke. No application query behavior changed; prior performance measurements were not rerun.
+
+Unresolved handoff: actual English recording and an accessible repository delivery URL.

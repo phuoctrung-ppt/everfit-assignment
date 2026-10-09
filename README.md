@@ -1,6 +1,6 @@
 # Everfit Workout Logging API
 
-Phase 02 adds exact kg/lb conversion, strict workout contracts, and a configurable exercise catalog to the NestJS/PostgreSQL foundation. Implemented endpoints: `GET /health` and `GET /exercises`. Workout writes, history, and personal records remain planned.
+Phase 03 adds atomic single/bulk workout logging with persistent idempotency to the NestJS/PostgreSQL API. Implemented endpoints: `GET /health`, `GET /exercises`, and both workout POST routes below. History and personal records remain planned.
 
 ## Local startup
 
@@ -43,11 +43,30 @@ This changes the previous full-catalog contract: clients must follow `pagination
 
 Fixtures include Bench Press, Squat, Deadlift, and Push Up; zero weight is supported for every exercise. Exact lookup uses JavaScript trim/lowercase consistently for stored names and requests; internal whitespace and aliases remain distinct. Migration `002-catalog-name-normalization.cjs` backfills existing names and retains the unique index while removing PostgreSQL’s conflicting Unicode lowercase check. The normalized column is text to allow lowercase character expansion; display names remain limited to 200 characters.
 
-With `NODE_ENV=development` (the host default), Swagger UI is at [localhost:3000/docs](http://localhost:3000/docs), and OpenAPI JSON is at `/docs-json`. Both routes and Swagger assets are disabled in `test` and `production`. The committed Compose configuration uses production mode. For local Swagger, use host development or a local Compose override setting `NODE_ENV=development`; keep production mode for deployment. Documentation currently exposes only health and catalog endpoints, with response/error schemas. The catalog’s `ZodResponse` decorator and shared serializer also enforce its response contract at runtime. Add each later endpoint’s DTOs and response decorators alongside its implementation.
+With `NODE_ENV=development` (the host default), Swagger UI is at [localhost:3000/docs](http://localhost:3000/docs), and OpenAPI JSON is at `/docs-json`. Both routes and Swagger assets are disabled in `test` and `production`. The committed Compose configuration uses production mode. For local Swagger, use host development or a local Compose override setting `NODE_ENV=development`; keep production mode for deployment. Documentation exposes health, catalog, and single/bulk logging endpoints, with request, required header, and response/error schemas. The catalog’s `ZodResponse` decorator and shared serializer also enforce its response contract at runtime. Add each later endpoint’s DTOs and response decorators alongside its implementation.
 
 Pagination contracts live in `src/schemas/pagination.schema.ts`; the reusable Zod DTO is `src/common/cursor-pagination-query.dto.ts`. A route with feature filters extends `CursorPaginationQuerySchema` and creates its own Zod DTO: `ExerciseListQuerySchema` adds `muscleGroup`, so Swagger includes it alongside `limit` and optional `cursor`. Routes needing only pagination can use `CursorPaginationQueryDto` directly. A paginated route declares its query DTO and a concrete response DTO built from `CursorPageSchema(ItemSchema)`, then uses `@ZodResponse` for that DTO. The exercises service validates its own cursor resource/version/tuple and filter binding before querying. To opt out, use the route's ordinary query/response contracts and corresponding service read; there is no global pagination registration or Swagger parameter-hiding mechanism. `/health` declares no pagination DTO, has no cursor/limit parameters in Swagger, and returns its ordinary health response.
 
-Unit conversion uses decimal.js with 50 significant digits: `1 lb = 0.45359237 kg`. Inputs are finite JSON numbers from 0–1,000,000 with at most six decimal places; normalized kg retains fourteen decimals. Output weights use four-decimal strings with half-up rounding, originals six-decimal strings. For example, 135 lb normalizes to `61.23496995000000` kg and displays as `61.2350` kg. Workout schemas already enforce strict shapes, UTC calendar timestamps through milliseconds, reps 1–10,000, 100 sets/entry, 100 entries/bulk, and 1,000 sets/request; logging routes consume these in Phase 03.
+Unit conversion uses decimal.js with 50 significant digits: `1 lb = 0.45359237 kg`. Inputs are finite JSON numbers from 0–1,000,000 with at most six decimal places; normalized kg retains fourteen decimals. Output weights use four-decimal strings with half-up rounding, originals six-decimal strings. For example, 135 lb normalizes to `61.23496995000000` kg and displays as `61.2350` kg. Workout schemas already enforce strict shapes, UTC calendar timestamps through milliseconds, reps 1–10,000, 100 sets/entry, 100 entries/bulk, and 1,000 sets/request; logging routes enforce these before acquiring a transaction.
+
+## Atomic workout logging
+
+`POST /users/:userId/workout-entries` creates one entry; `POST /users/:userId/workout-entries/bulk` accepts `{ "entries": [...] }` and creates the entire batch atomically. Both require exactly one `Idempotency-Key` header and return 201 with `{ "data": entry }` or `{ "data": [entry, ...] }` in request order.
+
+```sh
+curl -X POST http://localhost:3000/users/client-1/workout-entries \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: workout-20261009-1' \
+  -d '{"date":"2026-10-09T08:00:00Z","exerciseName":"Bench Press","sets":[{"reps":5,"weight":135,"unit":"lb"}]}'
+```
+
+Each entry returns its UUID, `userId`, UTC `date`/`createdAt`, exercise `{id, name, muscleGroups}`, and ordered sets. Each set includes UUID, 1-based `position`, `reps`, `weight: "61.2350"`, `unit: "kg"`, `originalWeight: "135.000000"`, and `originalUnit: "lb"` for the example. Exact normalized kg remains internal. Seed the catalog first; lookup trims/lowercases names without changing stored fingerprints. Unknown exercises return 400 with indexed paths such as `entries.1.exerciseName`; nothing is written.
+
+`userId` is case-sensitive, 1–128 letters/digits/underscores/hyphens. Keys are case-sensitive, 1–128 printable non-whitespace ASCII characters. Duplicate key headers, malformed bodies, unknown fields, numeric strings, unsupported units, and exceeded limits return 400 before opening a transaction. Authentication remains outside assignment scope: a supplied user ID selects data; it is not proof of identity.
+
+Keys are scoped to the user and shared across both POST routes, with no automatic expiry. Retry the same request with the same key: a matching request replays the committed 201 response, including original IDs and catalog metadata, after app restart or catalog rename. JSON object key order and numeric formatting do not affect matching; array order, string whitespace/casing, weight/unit, date spelling, and operation do. Different payloads or routes with the same user/key return 409. Distinct keys allow otherwise identical workouts.
+
+The service uses one READ COMMITTED transaction for reservation, catalog resolution, batched entry/set inserts, response validation, and replay storage. A unique `(user_id, key)` constraint coordinates concurrent clients. Replay is read in a separate statement after reservation contention resolves. All failures roll back; success returns only after commit. Lock/statement timeouts and transient connection failures return sanitized 503 without automatic write retries. If a connection fails around commit, reuse the same key to resolve the uncertain outcome. Idempotency keys, bodies, and raw errors are excluded from logs.
 
 ## Configuration
 
@@ -66,22 +85,22 @@ Invalid configuration stops startup before listening and reports field names wit
 
 ## Architecture and schema
 
-`AppModule` imports configuration, logging, database, health, and exercises modules. The catalog follows `ExercisesController → ExercisesService → ExercisesRepository`: the controller declares HTTP contracts, the service maps public responses and normalizes lookup names, and the repository executes SQL. Only `ExercisesService` is exported for other features; `resolveNames(client, names)` reuses the caller’s transaction client. The database service owns one bounded pool; transactions use one checked-out client and always release it. A failed rollback destroys that client. Shutdown hooks close the pool. `src/schemas/` owns Zod contracts; API DTOs use strict Zod objects and the global validation pipe.
+`AppModule` imports configuration, logging, database, health, exercises, and workouts modules. The catalog follows `ExercisesController → ExercisesService → ExercisesRepository`: the controller declares HTTP contracts, the service maps public responses and normalizes lookup names, and the repository executes SQL. Only `ExercisesService` is exported for other features; `resolveNames(client, names)` reuses the caller’s transaction client. The database service owns one bounded pool; transactions use one checked-out client and always release it. A failed rollback destroys that client. Shutdown hooks close the pool. `src/schemas/` owns Zod contracts; API DTOs use strict Zod objects and the global validation pipe.
 
 PostgreSQL fits the required relationships, atomic bulk operations, uniqueness constraints, and future analytical queries. Migration `001-workout-schema.cjs` creates:
 
 - `exercises`, `muscle_groups`, and `exercise_muscle_groups` for configurable catalog metadata.
 - `workout_entries` with user/exercise IDs and UTC timestamps; concurrent same-time entries are permitted.
 - `workout_sets` with ordered positions, reps, original `numeric(13,6)` weight/unit, and normalized `numeric(24,14)` kg.
-- `idempotency_requests` with a user/key primary key and response storage for Phase 03.
+- `idempotency_requests` with a user/key primary key and committed response storage for replay.
 
-Indexes support descending user history and user/exercise history, ordered sets, and reverse muscle-group lookup. Foreign keys prevent catalog deletion from removing historical data. Constraints enforce bounds and uniqueness. Shared workout schemas now validate supported units and decimal input precision for the upcoming logging API; PostgreSQL NUMERIC itself rounds excess scale.
+Indexes support descending user history and user/exercise history, ordered sets, and reverse muscle-group lookup. Foreign keys prevent catalog deletion from removing historical data. Constraints enforce bounds and uniqueness. Shared workout schemas validate supported units and decimal input precision for logging; PostgreSQL NUMERIC itself rounds excess scale.
 
 `pnpm db:migrate` applies pending migrations under the migration runner's lock/transaction; repeating it is a no-op. `pnpm db:rollback` permits only isolated `everfit_test_<32 hex>` database names. Never manually run destructive migration APIs against a database with valuable data.
 
 ## Health and errors
 
-`GET /exercises` translates known transient PostgreSQL/network connection and timeout failures to sanitized 503 responses; unexpected SQL/programming errors remain 500. No write retries are performed.
+`GET /exercises` and both logging POST routes translate known transient PostgreSQL/network connection and timeout failures to sanitized 503 responses; unexpected SQL/programming errors remain 500. No write retries are performed.
 
 `GET /health` runs `SELECT 1`: 200 with `{"status":"ok"}`, or 503 when the database is unavailable. This checks database connectivity, not the catalog or migration version; Compose guarantees migration ordering.
 
@@ -111,7 +130,7 @@ pnpm test:integration --runInBand
 
 Integration tests require `TEST_DATABASE_ADMIN_URL` pointing to a dedicated local/test PostgreSQL server. They create random `everfit_test_<32 hex>` databases, apply migrations, and drop only their generated databases on cleanup. Never point this variable at a production server. No test uses the development database as its cleanup target.
 
-Tests cover configuration, startup failure, real database readiness, transaction rollback, exact NUMERIC values, session timeouts, schema constraints, repeated migration, rollback/reapply, and the HTTP validation/error boundary. Phase 02 adds exact conversion and schema boundary cases, catalog HTTP/lookup/seeding checks, and development-only Swagger checks. Catalog lookup reuses the unique B-tree index on `normalized_name`; joins reuse the mapping primary key and reverse index. EXPLAIN integration tests execute the repository SQL for single/multiple-name resolution and first/subsequent cursor pages over 10,000 exercises. The cursor queries use `exercises_cursor_idx` and return at most the requested lookahead page. HTTP tests cover traversal, page boundaries, Unicode cursors, concurrent inserts/deletes, and sanitized pagination validation. No 50,000-workout-entry benchmark or production performance claim has been made.
+Tests cover configuration, startup failure, real database readiness, transaction rollback, exact NUMERIC values, session timeouts, schema constraints, repeated migration, rollback/reapply, and the HTTP validation/error boundary. Phase 02 adds exact conversion and schema boundary cases, catalog HTTP/lookup/seeding checks, and development-only Swagger checks. Catalog lookup reuses the unique B-tree index on `normalized_name`; joins reuse the mapping primary key and reverse index. EXPLAIN integration tests execute the repository SQL for single/multiple-name resolution and first/subsequent cursor pages over 10,000 exercises. The cursor queries use `exercises_cursor_idx` and return at most the requested lookahead page. HTTP tests cover traversal, page boundaries, Unicode cursors, concurrent inserts/deletes, and sanitized pagination validation. Phase 03 adds fingerprint identity, atomic single/bulk writes, indexed validation, exact stored values, persisted replay, conflicts, restart/catalog changes, concurrent writers, maximum request bounds, and repository/commit failure recovery tests. No 50,000-workout-entry benchmark or production performance claim has been made.
 
 ## Dependency choices and compatibility sources
 

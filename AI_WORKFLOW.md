@@ -228,3 +228,20 @@ Final pre-commit review found that JSON escaping of valid catalog names and a mu
 Final follow-up verification: 159 unit tests, 97 PostgreSQL/HTTP integration tests, Nest build, full TypeScript check, and full lint passed. Independent reviews found no blocking findings. The earlier logger-formatting lint failure no longer applies; its local formatting was corrected. Local execution evidence is recorded in the Phase 02 plan and the pagination/filter plans under `plans/`, which retain the existing Git exclusion. Catalog pagination is complete; planned workout-history pagination and later assignment phases remain open.
 
 Unrelated local logger and Compose-mode edits, and the preexisting assignment PDF, are excluded from this follow-up commit. The logger edit remains functionally unresolved: an earlier standalone probe reproduced `TypeError: err.message is not a function` when serializing an error. Passing the catalog suites does not verify that local logger behavior.
+
+
+## 6. Phase 03 atomic logging session — 2026-10-09
+
+User requested execution of “phase-03-atomic-login”; the repository phase is atomic workout logging. Codex followed that plan and kept authentication outside assignment scope. Applied security throughout, NestJS context-builder guidance for modules/transactions/validation/logging, PostgreSQL database guidance, Zod contracts, and code-review verification gates. No unresolved implementation issue required the problem-solving skill.
+
+The main agent implemented both POST routes, required duplicate-safe idempotency headers, versioned stable SHA-256 fingerprints, batched parameterized inserts, response mapping, and persistent reservation/replay. One bounded agent wrote real PostgreSQL tests; an independent reviewer checked source and final tests. Reservation, writes, validated response storage, and commit use one client with explicit READ COMMITTED isolation. Replay precedes catalog lookup and survives restart/renaming. No dependencies or migrations added.
+
+Initial fingerprint tests failed for the missing helper; four PostgreSQL route tests failed with 404 before route registration. Integration bootstrap then exposed a missing DatabaseModule import in WorkoutsModule, which was fixed. An unreachable-database test initially reused cached Nest configuration; moving it to its own Jest suite provided an independent bootstrap. The existing local logger edit invoked err.message as a tagged-template function; it was replaced with a generic error serializer. A real Pino regression verifies serialization neither throws nor leaks request secrets/raw errors. Existing Compose mode changes and the assignment PDF were preserved outside this implementation commit.
+
+Independent review found a test-evidence flaw: count assertions inside injected repository failures could be swallowed as expected HTTP 500 errors. Counts are now captured inside the transaction and asserted outside Nest’s exception boundary. The corrected four-test failure suite passed. No source/security blockers remained.
+
+Verification: lint, Nest build, full TypeScript checking, 168 unit tests and 121 PostgreSQL/HTTP integration tests passed. Phase 03 contributes 24 integration cases, covering two-app concurrent replay, distinct-key writes, scoped conflicts, rollback after partial writes/response storage/deferred COMMIT failure, injected lost commit acknowledgement, real lock/statement timeouts, unavailable connection acquisition, validation boundaries, and maximum 100-entry/1,000-set requests. Swagger documents both routes and required headers. The lost acknowledgement case injects a driver-shaped error after a real commit; it does not simulate a physical network outage.
+
+Phase 03 is complete; history, personal records, broader performance verification, and final delivery remain planned. No deployment, push, or publishing performed. Local plan/report artifacts retain the existing Git exclusion.
+
+Unresolved questions: none for Phase 03.

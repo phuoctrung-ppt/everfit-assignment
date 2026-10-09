@@ -8,6 +8,7 @@ import { loggingOptions } from './config/logging';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './modules/health/health.module';
 import { ExercisesModule } from './modules/exercises/exercises.module';
+import { WorkoutsModule } from './modules/workouts/workouts.module';
 import type { Environment } from './schemas/environment.schema';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 
@@ -26,6 +27,7 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
     DatabaseModule,
     HealthModule,
     ExercisesModule,
+    WorkoutsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

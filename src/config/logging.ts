@@ -12,7 +12,7 @@ export function loggingOptions(level: Environment['LOG_LEVEL']): Params {
           method: req.method,
         }),
         res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
-        err: (err) => ({ message: err.message || 'Request failed' }),
+        err: () => ({ message: 'Request failed' }),
       },
       redact: ['req.headers', 'req.body', 'req.query', 'res.headers'],
     },

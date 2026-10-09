@@ -30,6 +30,8 @@ describe('development API documentation', () => {
     expect(Object.keys(result.body.paths).sort()).toEqual([
       '/exercises',
       '/health',
+      '/users/{userId}/workout-entries',
+      '/users/{userId}/workout-entries/bulk',
     ]);
     const schemas = result.body.components.schemas;
     expect(schemas.HealthResponseDto.properties.status.enum).toEqual(['ok']);
@@ -77,6 +79,36 @@ describe('development API documentation', () => {
         'application/json'
       ].schema.$ref,
     ).toContain('ErrorResponseDto');
+    for (const suffix of ['', '/bulk']) {
+      const logging =
+        result.body.paths[`/users/{userId}/workout-entries${suffix}`].post;
+      expect(logging.parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: true,
+          }),
+          expect.objectContaining({
+            name: 'userId',
+            in: 'path',
+            required: true,
+          }),
+        ]),
+      );
+      expect(logging.requestBody.required).toBe(true);
+      const ref = logging.responses['201'].content[
+        'application/json'
+      ].schema.$ref
+        .split('/')
+        .at(-1);
+      expect(schemas[ref].properties.data.type).toBe(
+        suffix ? 'array' : 'object',
+      );
+      for (const status of ['400', '409', '413', '415', '500', '503']) {
+        expect(logging.responses[status]).toBeDefined();
+      }
+    }
   });
 
   it.each(['test', 'production'])(

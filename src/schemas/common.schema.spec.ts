@@ -1,10 +1,23 @@
 import {
+  ExerciseNameSchema,
   IdempotencyKeySchema,
   UserIdSchema,
   WeightUnitSchema,
 } from './common.schema';
 
 describe('shared request fields', () => {
+  it('preserves exercise name whitespace and case for request fingerprints', () => {
+    const value = '  Bench PRESS  ';
+    expect(ExerciseNameSchema.parse(value)).toBe(value);
+  });
+
+  it.each(['\u0000', 'Bench\u0000Press', '\u0000Bench Press'])(
+    'rejects NUL in exercise name %s before database lookup',
+    (value) => {
+      expect(ExerciseNameSchema.safeParse(value).success).toBe(false);
+    },
+  );
+
   it.each(['Coach_1-A', 'a'.repeat(128)])(
     'preserves valid user IDs %s',
     (value) => {

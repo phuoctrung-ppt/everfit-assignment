@@ -29,7 +29,7 @@ For the compiled host application, use `pnpm build && pnpm start`. Scripts load 
 
 ## Catalog and development Swagger
 
-Run `pnpm db:seed` after migrations to load `data/exercise-catalog.json` into the database selected by `DATABASE_URL`. The host seed command requires development dependencies (`ts-node`). For Docker startup, run it from the host after `pnpm install`; the production container does not run the TypeScript seed command. Seeding is transactional and repeatable. Stable exercise IDs preserve history; listed exercises receive the configured names and muscle-group mappings. Unlisted exercises and existing groups remain intact.
+Run `pnpm db:seed` after migrations to load `data/exercise-catalog.json` into the database selected by `DATABASE_URL`. The host seed command requires development dependencies (`ts-node`). For Docker startup, run it from the host after `pnpm install`; the production container does not run the TypeScript seed command. Seeding is transactional and repeatable. UUIDs are canonicalized before duplicate validation, so case-variant IDs cannot overwrite one another. NUL characters are rejected in exercise and muscle-group names. Stable exercise IDs preserve history; listed exercises receive the configured names and muscle-group mappings. Unlisted exercises and existing groups remain intact.
 
 ```sh
 curl http://localhost:3000/exercises
@@ -37,7 +37,7 @@ curl http://localhost:3000/exercises
 
 The response is `{ "data": [{ "id": "…", "name": "Bench Press", "muscleGroups": ["chest", "triceps"] }] }`, ordered by normalized name. An unseeded catalog returns `{ "data": [] }`. Fixtures include Bench Press, Squat, Deadlift, and Push Up; zero weight is supported for every exercise. Exact lookup uses JavaScript trim/lowercase consistently for stored names and requests; internal whitespace and aliases remain distinct. Migration `002-catalog-name-normalization.cjs` backfills existing names and retains the unique index while removing PostgreSQL’s conflicting Unicode lowercase check. The normalized column is text to allow lowercase character expansion; display names remain limited to 200 characters.
 
-With `NODE_ENV=development` (the host default), Swagger UI is at [localhost:3000/docs](http://localhost:3000/docs), and OpenAPI JSON is at `/docs-json`. Both routes and Swagger assets are disabled in `test` and `production`. Compose sets production mode, so use host development for Swagger; stop the Compose API or select a free `PORT` first. Documentation currently exposes only health and catalog endpoints, with response/error schemas. Add each later endpoint’s DTOs and response decorators alongside its implementation.
+With `NODE_ENV=development` (the host default), Swagger UI is at [localhost:3000/docs](http://localhost:3000/docs), and OpenAPI JSON is at `/docs-json`. Both routes and Swagger assets are disabled in `test` and `production`. Compose sets production mode, so use host development for Swagger; stop the Compose API or select a free `PORT` first. Documentation currently exposes only health and catalog endpoints, with response/error schemas. The catalog’s `ZodResponse` decorator and shared serializer enforce its response contract at runtime. Add each later endpoint’s DTOs and response decorators alongside its implementation.
 
 Unit conversion uses decimal.js with 50 significant digits: `1 lb = 0.45359237 kg`. Inputs are finite JSON numbers from 0–1,000,000 with at most six decimal places; normalized kg retains fourteen decimals. Output weights use four-decimal strings with half-up rounding, originals six-decimal strings. For example, 135 lb normalizes to `61.23496995000000` kg and displays as `61.2350` kg. Workout schemas already enforce strict shapes, UTC calendar timestamps through milliseconds, reps 1–10,000, 100 sets/entry, 100 entries/bulk, and 1,000 sets/request; logging routes consume these in Phase 03.
 
@@ -58,7 +58,7 @@ Invalid configuration stops startup before listening and reports field names wit
 
 ## Architecture and schema
 
-`AppModule` imports configuration, logging, database, and feature-local health modules. The database service owns one bounded pool; transactions use one checked-out client and always release it. A failed rollback destroys that client. Shutdown hooks close the pool. `src/schemas/` owns Zod contracts; API DTOs use strict Zod objects and the global validation pipe.
+`AppModule` imports configuration, logging, database, health, and exercises modules. The catalog follows `ExercisesController → ExercisesService → ExercisesRepository`: the controller declares HTTP contracts, the service maps public responses and normalizes lookup names, and the repository executes SQL. Only `ExercisesService` is exported for other features; `resolveNames(client, names)` reuses the caller’s transaction client. The database service owns one bounded pool; transactions use one checked-out client and always release it. A failed rollback destroys that client. Shutdown hooks close the pool. `src/schemas/` owns Zod contracts; API DTOs use strict Zod objects and the global validation pipe.
 
 PostgreSQL fits the required relationships, atomic bulk operations, uniqueness constraints, and future analytical queries. Migration `001-workout-schema.cjs` creates:
 
@@ -72,6 +72,8 @@ Indexes support descending user history and user/exercise history, ordered sets,
 `pnpm db:migrate` applies pending migrations under the migration runner's lock/transaction; repeating it is a no-op. `pnpm db:rollback` permits only isolated `everfit_test_<32 hex>` database names. Never manually run destructive migration APIs against a database with valuable data.
 
 ## Health and errors
+
+`GET /exercises` translates known transient PostgreSQL/network connection and timeout failures to sanitized 503 responses; unexpected SQL/programming errors remain 500. No write retries are performed.
 
 `GET /health` runs `SELECT 1`: 200 with `{"status":"ok"}`, or 503 when the database is unavailable. This checks database connectivity, not the catalog or migration version; Compose guarantees migration ordering.
 
@@ -101,7 +103,7 @@ pnpm test:integration --runInBand
 
 Integration tests require `TEST_DATABASE_ADMIN_URL` pointing to a dedicated local/test PostgreSQL server. They create random `everfit_test_<32 hex>` databases, apply migrations, and drop only their generated databases on cleanup. Never point this variable at a production server. No test uses the development database as its cleanup target.
 
-Tests cover configuration, startup failure, real database readiness, transaction rollback, exact NUMERIC values, session timeouts, schema constraints, repeated migration, rollback/reapply, and the HTTP validation/error boundary. Phase 02 adds exact conversion and schema boundary cases, catalog HTTP/lookup/seeding checks, and development-only Swagger checks. Catalog lookup reuses the unique B-tree index on `normalized_name`; joins reuse the mapping primary key and reverse index. No extra index is required for the small full-catalog response. No 50,000-workout-entry benchmark or production performance claim has been made.
+Tests cover configuration, startup failure, real database readiness, transaction rollback, exact NUMERIC values, session timeouts, schema constraints, repeated migration, rollback/reapply, and the HTTP validation/error boundary. Phase 02 adds exact conversion and schema boundary cases, catalog HTTP/lookup/seeding checks, and development-only Swagger checks. Catalog lookup reuses the unique B-tree index on `normalized_name`; joins reuse the mapping primary key and reverse index. EXPLAIN integration tests execute the same repository SQL for single/multiple-name resolution and full catalog listing. No extra index is required for the small full-catalog response. No 50,000-workout-entry benchmark or production performance claim has been made.
 
 ## Dependency choices and compatibility sources
 

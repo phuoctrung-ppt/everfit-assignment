@@ -6,6 +6,7 @@ import { seedExerciseCatalog } from '../scripts/seed-exercise-catalog';
 import { createApplication } from '../src/bootstrap';
 import { DatabaseService } from '../src/database/database.service';
 import { ExercisesRepository } from '../src/modules/exercises/exercises.repository';
+import { ExercisesService } from '../src/modules/exercises/exercises.service';
 import {
   ExerciseCatalogSchema,
   type ExerciseCatalog,
@@ -17,6 +18,7 @@ describe('exercise catalog against PostgreSQL', () => {
   let app: INestApplication;
   let service: DatabaseService;
   let repository: ExercisesRepository;
+  let exercises: ExercisesService;
   let catalog: ExerciseCatalog;
   const benchId = '10000000-0000-4000-8000-000000000001';
 
@@ -31,6 +33,7 @@ describe('exercise catalog against PostgreSQL', () => {
     await app.init();
     service = app.get(DatabaseService);
     repository = app.get(ExercisesRepository);
+    exercises = app.get(ExercisesService);
     catalog = ExerciseCatalogSchema.parse(
       JSON.parse(await readFile(resolve('data/exercise-catalog.json'), 'utf8')),
     );
@@ -83,7 +86,7 @@ describe('exercise catalog against PostgreSQL', () => {
 
   it('resolves trimmed case-insensitive exact names, excluding unknowns and aliases', async () => {
     await service.withTransaction(async (client) => {
-      const result = await repository.resolveNames(client, [
+      const result = await exercises.resolveNames(client, [
         ' bench PRESS ',
         'Bench Press',
         'Bench  Press',
@@ -98,7 +101,7 @@ describe('exercise catalog against PostgreSQL', () => {
         muscleGroups: ['chest', 'triceps'],
       });
       const query = jest.spyOn(client, 'query');
-      expect(await repository.resolveNames(client, [])).toEqual(new Map());
+      expect(await exercises.resolveNames(client, [])).toEqual(new Map());
       expect(query).not.toHaveBeenCalled();
       query.mockRestore();
     });

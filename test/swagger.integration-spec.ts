@@ -39,7 +39,12 @@ describe('development API documentation', () => {
       .split('/')
       .at(-1);
     expect(schemas[schemaName].properties.data.type).toBe('array');
-    expect(JSON.stringify(catalog)).not.toContain('normalizedName');
+    expect(JSON.stringify(schemas[schemaName])).not.toContain('normalizedName');
+    expect(
+      result.body.paths['/exercises'].get.responses['503'].content[
+        'application/json'
+      ].schema.$ref,
+    ).toContain('ErrorResponseDto');
   });
 
   it.each(['test', 'production'])(

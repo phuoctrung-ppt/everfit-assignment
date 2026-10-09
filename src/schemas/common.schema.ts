@@ -31,6 +31,10 @@ export const IdempotencyKeySchema = z
 export const ExerciseNameSchema = z
   .string()
   .refine(
+    (name) => !name.includes('\u0000'),
+    'Exercise name must not contain NUL',
+  )
+  .refine(
     (name) => name.trim().length >= 1 && name.trim().length <= 200,
     'Exercise name must contain 1 to 200 characters after trimming',
   );

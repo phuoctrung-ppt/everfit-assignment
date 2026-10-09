@@ -4,6 +4,7 @@ import { seedExerciseCatalog } from '../scripts/seed-exercise-catalog';
 import { validateEnvironment } from '../src/config/configuration';
 import { DatabaseService } from '../src/database/database.service';
 import { ExercisesRepository } from '../src/modules/exercises/exercises.repository';
+import { ExercisesService } from '../src/modules/exercises/exercises.service';
 import { normalizeExerciseName } from '../src/modules/exercises/exercise.types';
 import type { Environment } from '../src/schemas/environment.schema';
 import { runTestMigrations } from './support/migrations';
@@ -12,7 +13,7 @@ import { createTestDatabase } from './support/test-database';
 describe('Unicode catalog normalization', () => {
   let database: Awaited<ReturnType<typeof createTestDatabase>>;
   let service: DatabaseService;
-  let repository: ExercisesRepository;
+  let catalogService: ExercisesService;
   beforeAll(async () => {
     database = await createTestDatabase();
     service = new DatabaseService(
@@ -23,7 +24,7 @@ describe('Unicode catalog normalization', () => {
         }),
       ),
     );
-    repository = new ExercisesRepository(service);
+    catalogService = new ExercisesService(new ExercisesRepository(service));
   });
   afterAll(async () => {
     await service?.onApplicationShutdown();
@@ -40,7 +41,7 @@ describe('Unicode catalog normalization', () => {
     );
     await runTestMigrations(database.databaseUrl);
     await service.withTransaction(async (client) => {
-      const result = await repository.resolveNames(client, [name]);
+      const result = await catalogService.resolveNames(client, [name]);
       expect(result.get(normalizeExerciseName(name))?.id).toBe(id);
     });
   });
@@ -55,7 +56,7 @@ describe('Unicode catalog normalization', () => {
     await seedExerciseCatalog(service, catalog);
     await seedExerciseCatalog(service, catalog);
     await service.withTransaction(async (client) => {
-      const result = await repository.resolveNames(
+      const result = await catalogService.resolveNames(
         client,
         exercises.map(({ name }) => ` ${name} `),
       );

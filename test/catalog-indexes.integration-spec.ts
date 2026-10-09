@@ -1,5 +1,13 @@
 import { Client } from 'pg';
+import {
+  LIST_EXERCISES_SQL,
+  RESOLVE_EXERCISES_SQL,
+} from '../src/modules/exercises/exercise.queries';
 import { createTestDatabase } from './support/test-database';
+
+interface ExplainRow {
+  'QUERY PLAN': [{ Plan: { 'Actual Rows': number } }];
+}
 
 describe('catalog index query plans', () => {
   let database: Awaited<ReturnType<typeof createTestDatabase>>;
@@ -25,25 +33,39 @@ describe('catalog index query plans', () => {
     await database?.close();
   });
 
-  it('uses the existing unique name index for selective exact-name resolution', async () => {
-    const result = await client.query(
-      `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
-      SELECT id FROM exercises WHERE normalized_name = ANY($1::text[])`,
-      [['exercise 4321']],
+  it.each([
+    { names: ['exercise 4321'], count: 1 },
+    { names: ['exercise 4321', 'exercise 7654', 'exercise 9999'], count: 3 },
+  ])(
+    'uses the name index for the full $count-name resolution query',
+    async ({ names, count }) => {
+      const result = await client.query<ExplainRow>(
+        `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${RESOLVE_EXERCISES_SQL}`,
+        [names],
+      );
+      const plan = result.rows[0]?.['QUERY PLAN'][0].Plan;
+      expect(JSON.stringify(plan)).toContain('exercises_normalized_name_key');
+      expect(plan?.['Actual Rows']).toBe(count);
+    },
+  );
+
+  it('executes the full catalog joins and aggregation for all 10000 exercises', async () => {
+    const result = await client.query<ExplainRow>(
+      `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${LIST_EXERCISES_SQL}`,
     );
-    const plan = JSON.stringify(result.rows[0]['QUERY PLAN']);
-    expect(plan).toContain('exercises_normalized_name_key');
-    expect(plan).toContain('"Actual Rows":1');
+    expect(result.rows[0]?.['QUERY PLAN'][0].Plan['Actual Rows']).toBe(10000);
   });
 
   it('uses the existing reverse mapping index for selective muscle-group lookup', async () => {
-    const result = await client.query(
+    const result = await client.query<ExplainRow>(
       `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
       SELECT exercise_id FROM exercise_muscle_groups WHERE muscle_group_id = md5($1)::uuid`,
       ['group-43'],
     );
-    const plan = JSON.stringify(result.rows[0]['QUERY PLAN']);
-    expect(plan).toContain('exercise_muscle_groups_reverse_idx');
-    expect(plan).toContain('"Actual Rows":100');
+    const plan = result.rows[0]?.['QUERY PLAN'][0].Plan;
+    expect(JSON.stringify(plan)).toContain(
+      'exercise_muscle_groups_reverse_idx',
+    );
+    expect(plan?.['Actual Rows']).toBe(100);
   });
 });

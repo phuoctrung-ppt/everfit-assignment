@@ -27,7 +27,7 @@ Rejected storage alternatives: JSONB sets complicate relational constraints and 
 
 ## Architecture and proposed implementation defaults
 
-Use a modular NestJS application, constructor injection, and feature-local controllers, services, and repositories. Controllers validate and delegate; services own business decisions; repositories own parameterized SQL. Cross-feature interfaces are explicit, with no circular imports.
+Use a modular NestJS application, constructor injection, and feature-local controllers, services, and repositories. Controllers validate and delegate; services own business decisions; repositories own parameterized SQL. Cross-feature interfaces are explicit, with no circular imports. The exercise module exports `ExercisesService`; controllers and other features do not inject its repository. The service owns name normalization, public response mapping, and transient database error translation; the repository accepts normalized names and executes SQL on the supplied transaction client. Catalog responses are runtime-validated through `ZodResponse` and `ZodSerializerInterceptor`.
 
 Proposed tooling for document review: TypeScript strict mode, pnpm, `pg` for direct SQL, `node-pg-migrate` for migrations, Zod with `nestjs-zod` for API/config validation, `decimal.js` for decimal conversion, `nestjs-pino` for JSON logs, Jest and Supertest for tests. Direct SQL makes the required aggregation and transaction behavior visible without adding an ORM. Phase 01 pinned and verified compatible versions; see README and package.json. Phase 02 adds decimal.js 10.6.0 and development-only Swagger 11.4.7.
 

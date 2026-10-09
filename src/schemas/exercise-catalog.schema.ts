@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { normalizeExerciseName } from '../modules/exercises/exercise.types';
+import { ExerciseNameSchema } from './common.schema';
+
+// PostgreSQL UUID identity ignores letter casing; normalize before duplicate checks.
+const catalogId = z.uuid().transform((id) => id.toLowerCase());
 
 const groupName = z
   .string()
@@ -7,18 +11,22 @@ const groupName = z
   .min(1)
   .max(80)
   .refine(
+    (name) => !name.includes('\u0000'),
+    'Muscle group name must not contain NUL',
+  )
+  .refine(
     (name) => name === name.toLowerCase(),
     'Muscle group names must be lowercase',
   );
 
 export const ExerciseCatalogSchema = z
   .strictObject({
-    muscleGroups: z.array(z.strictObject({ id: z.uuid(), name: groupName })),
+    muscleGroups: z.array(z.strictObject({ id: catalogId, name: groupName })),
     exercises: z
       .array(
         z.strictObject({
-          id: z.uuid(),
-          name: z.string().trim().min(1).max(200),
+          id: catalogId,
+          name: ExerciseNameSchema.transform((name) => name.trim()),
           muscleGroups: z.array(groupName),
         }),
       )

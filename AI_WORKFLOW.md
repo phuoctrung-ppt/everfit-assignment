@@ -207,3 +207,12 @@ Host development exposes Swagger at `/docs`; Compose remains production, and the
 Independent Phase 02 review reproduced a Unicode normalization mismatch: JavaScript lowercased `İ Press` differently from PostgreSQL’s CHECK expression, so valid seed input failed. Migration 002 makes application normalization authoritative, backfills existing names, preserves unique indexing, and allows lowercase expansion beyond 200 characters in the normalized column. A real-database regression covers Turkish dotted I, Greek final sigma, an apostrophe during backfill, and a maximum-length expanding name.
 
 Reviewer rechecked the Unicode fix and found no remaining blockers. An independent collision probe confirmed that migration failure rolls back without merging catalog IDs or advancing the migration version.
+
+
+## Phase 02 review follow-up
+
+User requested review fixes and explicit controller/service/repository separation. Controllers now depend on ExercisesService; the module exports the service rather than persistence. Name normalization and public response mapping sit in the service, with repository SQL reused by complete-query EXPLAIN tests.
+
+UUIDs are canonicalized before duplicate seed validation, and NUL is rejected in catalog/workout names. Recognized transient database failures produce sanitized 503 errors; unexpected failures remain 500. Structural error classification handles native driver errors from another JavaScript realm, covered by a regression. ZodResponse and the DI-managed serializer connect runtime output validation with Swagger.
+
+No dependencies or indexes added. Validation: lint, Nest build, TypeScript check, 135 unit tests and 50 PostgreSQL/HTTP integration tests passed. Cursor pagination remains a separate follow-up commit. Unrelated local logger/Compose edits and the assignment PDF are excluded.

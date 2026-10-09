@@ -105,6 +105,10 @@ describe('HTTP boundary', () => {
 
   it('reports an unreachable database as 503', async () => {
     await request(app.getHttpServer()).get('/health').expect(503);
+    const result = await request(app.getHttpServer())
+      .get('/exercises')
+      .expect(503);
+    expect(result.body.error.code).toBe('SERVICE_UNAVAILABLE');
   });
 
   it('invalid configuration exits before listening without exposing credentials', async () => {

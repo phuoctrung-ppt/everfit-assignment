@@ -9,6 +9,7 @@ import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './modules/health/health.module';
 import { ExercisesModule } from './modules/exercises/exercises.module';
 import { WorkoutsModule } from './modules/workouts/workouts.module';
+import { PersonalRecordsModule } from './modules/personal-records/personal-records.module';
 import type { Environment } from './schemas/environment.schema';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 
@@ -28,6 +29,7 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
     HealthModule,
     ExercisesModule,
     WorkoutsModule,
+    PersonalRecordsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

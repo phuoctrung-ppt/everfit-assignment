@@ -1,6 +1,6 @@
 # Workout Logging API Design
 
-Status: Phase 04 execution authorized on 2026-10-09. Foundation, unit conversion, workout schemas, catalog, atomic logging, and filtered history implemented; verification recorded in README and phase plans. Personal-record endpoints remain planned.
+Status: Phase 05 execution authorized on 2026-10-09. Foundation, unit conversion, workout schemas, catalog, atomic logging, filtered history, and personal-record endpoints implemented; verification tracked in README and phase plans. Performance verification and delivery remain planned.
 
 ## Intent and scope
 
@@ -131,4 +131,4 @@ Set bounded statement/lock timeouts (proposed 5 seconds/3 seconds); a waiting re
 
 The user supplied 22.5 hours across A–K, including review/correction and focused tests within each package. Video preparation/recording are outside that total; no actual effort or completion percentage is inferred. See the [estimate and phased plan](../plans/20261009-1146-workout-api/plan.md).
 
-The schema, endpoint behavior, calculations, and verification approach were approved conversationally. Tool choices, concrete limits, decimal serialization, fingerprint/cursor encoding, timeout values, and local performance targets were introduced in the written draft. The user authorized Phases 01–04 execution; later phases remain planned. This document and its companion plan do not authorize publishing or deploying anything.
+The schema, endpoint behavior, calculations, and verification approach were approved conversationally. Tool choices, concrete limits, decimal serialization, fingerprint/cursor encoding, timeout values, and local performance targets were introduced in the written draft. The user authorized Phases 01–05 execution; later phases remain planned. This document and its companion plan do not authorize publishing or deploying anything.

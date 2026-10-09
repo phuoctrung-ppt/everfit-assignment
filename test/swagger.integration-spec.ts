@@ -30,6 +30,8 @@ describe('development API documentation', () => {
     expect(Object.keys(result.body.paths).sort()).toEqual([
       '/exercises',
       '/health',
+      '/users/{userId}/personal-records',
+      '/users/{userId}/personal-records/compare',
       '/users/{userId}/workout-entries',
       '/users/{userId}/workout-entries/bulk',
     ]);

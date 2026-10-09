@@ -278,3 +278,17 @@ Initial 41 schema/cursor tests failed for absent implementation, then passed. In
 Final verification: lint, Nest build, full TypeScript checking, 212 unit tests (13 suites), and 170 PostgreSQL/HTTP integration tests (21 suites) passed. Phase adds 49 integration cases plus Swagger assertions, covering tied pages/full sets, mixed-unit originals, filters and cursor binding, user isolation, concurrent inserts, strict inputs, literal SQL-looking text, and real lock timeout/recovery. No dependencies or migrations added. History performance remains Phase 06; nonsnapshot traversal documented. Existing Compose edit, assignment PDF, and prior AI_WORKFLOW deletion preserved; local plans remain Git-excluded.
 
 Unresolved questions: none for Phase 04.
+
+## 10. Phase 05 personal records session — 2026-10-09
+
+User requested `phase-05-personal-records`. Applied NestJS context-builder, PostgreSQL, Zod validation, and code-review skills. Parent implemented contracts, feature module/controller/service/repository, decimal formulas and response mapping; a bounded agent implemented real PostgreSQL fixtures; an independent reviewer checked source, tests, and documentation.
+
+Both personal-record GET endpoints use exact catalog resolution, strict UTC ranges, kg/lb output, and three independently selected metrics. One parameterized SQL statement ranks both comparison periods in the same snapshot; at most six rows reach application code. Epley ranks its exact numerator, ties use earliest date/entry UUID/set position, and differences subtract exact values/numerators before conversion and display rounding. Missing data stays null, while zero-weight records remain real values. Reused existing database, unit conversion, catalog, validation/error, and response serialization infrastructure; no dependency or migration added.
+
+Initial formula tests failed because the helper was absent; five PostgreSQL endpoint tests failed with 404 before route registration. Integration bootstrap then caught a missing DatabaseModule import in PersonalRecordsModule; corrected before successful runs. Independent review found no actionable defects and reran 17 focused unit tests plus two PostgreSQL ranking tests. The additional ranking tests verify equal Epley numerators across different reps and one-query/six-row results against explicit formula fixtures.
+
+Final verification: lint, Nest build, full TypeScript checking, 229 unit tests (15 suites), and 222 PostgreSQL/HTTP integration tests (26 suites) passed. Phase adds 17 unit tests and 52 integration cases, including OpenAPI, precision/ties, ranges/overlap, signed differences, absent versus zero data, strict validation, isolation, and real timeout recovery. All new code files remain under 200 lines. Representative PR/history performance remains Phase 06 work.
+
+Existing environment/Compose/package/lockfile edits, prior workflow deletion, and assignment PDF preserved outside the feature commit. Plans/reports retain the existing Git exclusion. No push or deployment performed.
+
+Unresolved questions: none for Phase 05.

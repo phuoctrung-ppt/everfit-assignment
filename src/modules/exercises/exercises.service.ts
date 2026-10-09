@@ -74,6 +74,12 @@ export class ExercisesService {
     );
   }
 
+  async resolveName(name: string): Promise<Exercise | undefined> {
+    return this.runQuery(() =>
+      this.exercises.findByNormalizedName(normalizeExerciseName(name)),
+    );
+  }
+
   private async runQuery<T>(work: () => Promise<T>): Promise<T> {
     try {
       return await work();

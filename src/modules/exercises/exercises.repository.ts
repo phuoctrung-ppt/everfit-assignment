@@ -28,12 +28,16 @@ export class ExercisesRepository {
   }
 
   async findByNormalizedNames(
-    client: PoolClient,
+    client: Pick<PoolClient, 'query'>,
     normalizedNames: string[],
   ): Promise<Exercise[]> {
     const result = await client.query<Exercise>(RESOLVE_EXERCISES_SQL, [
       normalizedNames,
     ]);
     return result.rows;
+  }
+
+  async findByNormalizedName(name: string): Promise<Exercise | undefined> {
+    return (await this.findByNormalizedNames(this.database.pool, [name]))[0];
   }
 }

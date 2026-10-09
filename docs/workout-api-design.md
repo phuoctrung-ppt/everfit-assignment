@@ -1,6 +1,6 @@
 # Workout Logging API Design
 
-Status: Phase 05 execution authorized on 2026-10-09. Foundation, unit conversion, workout schemas, catalog, atomic logging, filtered history, and personal-record endpoints implemented; verification tracked in README and phase plans. Performance verification and delivery remain planned.
+Status: Phases 01–06 complete on 2026-10-09. Foundation, unit conversion, workout schemas, catalog, atomic logging, filtered history, and personal-record endpoints implemented; verification tracked in README and phase plans. Phase 06 adds measured performance and expanded concurrency evidence; delivery remains Phase 07.
 
 ## Intent and scope
 

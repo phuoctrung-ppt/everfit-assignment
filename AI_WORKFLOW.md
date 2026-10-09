@@ -292,3 +292,20 @@ Final verification: lint, Nest build, full TypeScript checking, 229 unit tests (
 Existing environment/Compose/package/lockfile edits, prior workflow deletion, and assignment PDF preserved outside the feature commit. Plans/reports retain the existing Git exclusion. No push or deployment performed.
 
 Unresolved questions: none for Phase 05.
+
+
+## 11. Phase 06 verification session — 2026-10-09
+
+User requested Phase 06 execution and resumed after an external agent usage-limit interruption. Applied code-review, NestJS context-builder, PostgreSQL, and systematic-debugging guidance. Bounded agents added concurrency/error-boundary tests and an independent deterministic benchmark oracle; an independent reviewer checked the combined changes and production SQL. Existing in-progress files were resumed rather than recreated.
+
+Added 17 PostgreSQL/HTTP tests: ten simultaneous clients across two app instances, one committed same-key batch, distinct-key writes, conflicting payloads, fresh-app replay, observed database contention with unrelated-key progress, timeout/retry, compressed body limits, header/calendar/decimal/JSON boundaries, cursor tampering, and user isolation. A compressed-body test initially serialized its Buffer through Superagent; corrected transport to raw bytes and verified 413 plus key reuse. No production validation/concurrency bug found.
+
+The read benchmark loads 50,000 primary entries/150,000 sets plus 1,000 secondary entries/3,000 sets into an explicitly isolated PostgreSQL target. Deterministic seed 42, mixed units, four exercises, timestamp ties, multiple months. Independent BigInt rational arithmetic checks complete HTTP responses; repository SQL is observed directly for EXPLAIN ANALYZE/BUFFERS. Reviewer identified secondary fixtures that duplicated early primary data and could miss absent user scoping; a failing fixture regression was made green with distinctly heavier secondary weights and dates spanning the primary range. Existing bulk CPU/memory runner remains available as test:performance:bulk.
+
+Performance misses drove one production query correction in two measured revisions. Original all-time p95 637.99ms exceeded the unchanged 500ms target; plan ranked 112,500 metric rows and spilled an 8,864KiB sort. Materializing matching sets and selecting top-one winners removed that sort but still failed comparison p95 at 598.81ms: the JSON ranges function estimated 100 periods and triggered 220–341ms JIT compilation. Exposing the actual JSON array length to the planner removed that overhead without truncating periods or changing global JIT settings. Same statement snapshot, formulas, ties, overlap, and empty periods preserved. No dependency, schema, index, cache, or precomputed record added.
+
+Verified run: all 999 responses correct; warm p95 history 3.90–7.79ms, all-time records 130.56ms, monthly records 30.00ms, comparison 68.48ms. Counts unchanged and cleanup successful. All targets passed. These are local concurrency-1 observations, not production capacity claims. Failed runs and reviewed SQL plans remain with the Git-excluded phase report; docs/read-performance.md preserves reproduction and results. Minor deferred: benchmark failures report stage/category but omit detailed assertion diagnostics.
+
+Final checks: lint, Nest build, full TypeScript checking, 244 unit tests (17 suites), and 239 PostgreSQL integration tests (28 suites) passed after the SQL change. Existing environment/Compose/dependency/lockfile edits, prior workflow deletion, and assignment PDF preserved outside the phase commit. No push or deployment. Phase 07 remains planned.
+
+Unresolved questions: none.

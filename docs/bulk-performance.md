@@ -1,21 +1,21 @@
 # Bulk logging performance test
 
-Run `pnpm test:performance` to review Phase 03's existing bulk API under a large persisted dataset. This opt-in command builds the application, creates a random isolated PostgreSQL test database, loads 51,000 entries/153,000 sets for one user through HTTP, and adds 1,000 entries/3,000 sets for another user. It requires the existing `TEST_DATABASE_ADMIN_URL`; it never targets the development `DATABASE_URL` for writes or cleanup. Generated databases are dropped afterward. Synthetic fixtures span four exercises, six months, timestamp ties, and mixed kg/lb/zero weights.
+Run `pnpm test:performance:bulk` to review Phase 03's existing bulk API under a large persisted dataset. This opt-in command builds the application, creates a random isolated PostgreSQL test database, loads 51,000 entries/153,000 sets for one user through HTTP, and adds 1,000 entries/3,000 sets for another user. It requires the existing `TEST_DATABASE_ADMIN_URL`; it never targets the development `DATABASE_URL` for writes or cleanup. Generated databases are dropped afterward. Synthetic fixtures span four exercises, six months, timestamp ties, and mixed kg/lb/zero weights.
 
 ## Commands
 
 ```sh
 # Standard screening: six mixed soak windows, visible HTTP logs
-pnpm test:performance
+pnpm test:performance:bulk
 
 # Show actual WorkoutLoggingService start/completion/failure events
-PERF_LOG_LEVEL=debug pnpm test:performance
+PERF_LOG_LEVEL=debug pnpm test:performance:bulk
 
 # Quiet comparison with the recorded silent baseline
-PERF_LOG_LEVEL=silent PERF_ROUNDS=30 pnpm test:performance
+PERF_LOG_LEVEL=silent PERF_ROUNDS=30 pnpm test:performance:bulk
 
 # Explicit report location; directory created automatically
-PERF_REPORT=artifacts/performance/bulk-local.json pnpm test:performance
+PERF_REPORT=artifacts/performance/bulk-local.json pnpm test:performance:bulk
 ```
 
 `PERF_LOG_LEVEL` defaults to `info` and accepts the application log levels (`fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`). Backend stdout/stderr are inherited by your terminal. Use `debug` to see `WorkoutLoggingService` events; `info` shows HTTP completion/error logs. The startup banner prints the isolated backend URL and PID, so its random port is explicit. Your existing port-3000 server receives no benchmark traffic. Each scenario prints p95, CPU/request, peak sampled RSS, post-GC heap, and throughput; the JSON report records the actual log level. Logging overhead is part of the measured run, so compare runs using the same level/output destination.
@@ -71,7 +71,7 @@ Repeated validation and response parsing are profiling candidates: requests are 
 
 ## Measured local run — 2026-10-09
 
-Extended run used 30 windows with the then-default silent logging. Reproduce that logging mode with `PERF_LOG_LEVEL=silent PERF_ROUNDS=30 pnpm test:performance`. All diagnostic budgets and correctness checks passed. Environment: Node v24.21.0, PostgreSQL 17.11, Linux x64, Intel i5-1135G7, 8 logical CPUs, 39.0 GiB reported host RAM. Base application commit `6e6b680`; harness was an uncommitted working-tree addition. Production mode, silent logging, loopback HTTP. Total execution approximately 69 seconds; this is a short soak, not hours of endurance testing.
+Extended run used 30 windows with the then-default silent logging. Reproduce that logging mode with `PERF_LOG_LEVEL=silent PERF_ROUNDS=30 pnpm test:performance:bulk`. All diagnostic budgets and correctness checks passed. Environment: Node v24.21.0, PostgreSQL 17.11, Linux x64, Intel i5-1135G7, 8 logical CPUs, 39.0 GiB reported host RAM. Base application commit `6e6b680`; harness was an uncommitted working-tree addition. Production mode, silent logging, loopback HTTP. Total execution approximately 69 seconds; this is a short soak, not hours of endurance testing.
 
 Seed: primary user 51,000 entries/153,000 sets; secondary user 1,000/3,000. End: primary user 138,100 entries/1,024,000 sets and 1,381 idempotency records; secondary unchanged. Each scenario below has 100 measured requests after ten warmups; mixed soak has 30 × 80 requests.
 

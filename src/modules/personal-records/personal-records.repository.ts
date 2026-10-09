@@ -3,30 +3,37 @@ import { DatabaseService } from '../../database/database.service';
 import type { RecordRange, RecordWinnerRow } from './personal-records.types';
 
 // Both periods and all metrics are evaluated by one statement/MVCC snapshot.
+// Top-one sorts avoid ranking every metric-expanded candidate. The JSON array
+// length also exposes the real period count to the planner (recordset defaults to 100).
 export const SELECT_RECORD_WINNERS_SQL = `
-  WITH candidates AS (
+  WITH ranges AS MATERIALIZED (
+    SELECT * FROM jsonb_to_recordset($3::jsonb)
+      AS r(period text, "from" timestamptz, "to" timestamptz)
+    LIMIT jsonb_array_length($3::jsonb)
+  ), candidates AS MATERIALIZED (
     SELECT r.period, e.id AS entry_id, e.performed_at AS achieved_at,
-           s.position AS set_position, s.reps, s.weight_kg,
-           m.metric, m.rank_value,
-           row_number() OVER (
-             PARTITION BY r.period, m.metric
-             ORDER BY m.rank_value DESC, e.performed_at ASC, e.id ASC, s.position ASC
-           ) AS rank
-    FROM jsonb_to_recordset($3::jsonb) AS r(period text, "from" timestamptz, "to" timestamptz)
+           s.position AS set_position, s.reps, s.weight_kg
+    FROM ranges r
     JOIN workout_entries e ON e.user_id = $1 AND e.exercise_id = $2::uuid
       AND (r."from" IS NULL OR e.performed_at >= r."from")
       AND (r."to" IS NULL OR e.performed_at < r."to")
     JOIN workout_sets s ON s.entry_id = e.id
-    CROSS JOIN LATERAL (VALUES
-      ('heaviestSet', s.weight_kg),
-      ('highestVolumeSet', s.weight_kg * s.reps),
-      ('estimatedOneRepMax', s.weight_kg * (30 + s.reps))
-    ) AS m(metric, rank_value)
   )
-  SELECT period, metric, weight_kg::text, reps, achieved_at, entry_id, set_position,
-         (CASE WHEN metric = 'estimatedOneRepMax' THEN rank_value / 30
-               ELSE rank_value END)::text AS canonical_value
-  FROM candidates WHERE rank = 1`;
+  SELECT r.period, m.metric, winner.weight_kg::text, winner.reps,
+         winner.achieved_at, winner.entry_id, winner.set_position,
+         (CASE WHEN m.metric = 'estimatedOneRepMax' THEN winner.rank_value / 30
+               ELSE winner.rank_value END)::text AS canonical_value
+  FROM ranges r
+  CROSS JOIN (VALUES ('heaviestSet'), ('highestVolumeSet'), ('estimatedOneRepMax')) AS m(metric)
+  CROSS JOIN LATERAL (
+    SELECT c.*, CASE m.metric
+      WHEN 'heaviestSet' THEN c.weight_kg
+      WHEN 'highestVolumeSet' THEN c.weight_kg * c.reps
+      ELSE c.weight_kg * (30 + c.reps) END AS rank_value
+    FROM candidates c WHERE c.period = r.period
+    ORDER BY rank_value DESC, c.achieved_at ASC, c.entry_id ASC, c.set_position ASC
+    LIMIT 1
+  ) AS winner`;
 
 @Injectable()
 export class PersonalRecordsRepository {

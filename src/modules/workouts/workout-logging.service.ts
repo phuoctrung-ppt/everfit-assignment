@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ZodValidationException } from 'nestjs-zod';
@@ -28,6 +29,7 @@ import type { WorkoutEntry } from '../../schemas/workout-response.schema';
 
 @Injectable()
 export class WorkoutLoggingService {
+  private readonly logger = new Logger(WorkoutLoggingService.name);
   constructor(
     private readonly database: DatabaseService,
     private readonly exercises: ExercisesService,
@@ -69,8 +71,16 @@ export class WorkoutLoggingService {
     const entries =
       'entries' in validatedBody ? validatedBody.entries : [validatedBody];
     const fingerprint = requestFingerprint(userId, operation, validatedBody);
+    const started = performance.now();
+    let outcome = 'created';
+    this.logger.debug({
+      event: 'workout_logging_started',
+      operation,
+      entryCount: entries.length,
+      setCount: entries.reduce((total, entry) => total + entry.sets.length, 0),
+    });
     try {
-      return await this.database.withTransaction(async (client) => {
+      const result = await this.database.withTransaction(async (client) => {
         // Explicitly override any role/database default: replay needs fresh statement snapshots.
         await client.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
         if (
@@ -78,6 +88,7 @@ export class WorkoutLoggingService {
         ) {
           const stored = await this.idempotency.find(client, userId, key);
           if (stored.fingerprint !== fingerprint) throw new ConflictException();
+          outcome = 'replayed';
           return stored.result;
         }
         const exercises = await this.exercises.resolveNames(
@@ -114,7 +125,20 @@ export class WorkoutLoggingService {
         await this.idempotency.complete(client, userId, key, result);
         return result;
       });
+      // Transaction has committed, including replay lookups, before completion is logged.
+      this.logger.debug({
+        event: 'workout_logging_completed',
+        operation,
+        outcome,
+        durationMs: performance.now() - started,
+      });
+      return result;
     } catch (error) {
+      this.logger.debug({
+        event: 'workout_logging_failed',
+        operation,
+        durationMs: performance.now() - started,
+      });
       // Covers acquisition, BEGIN, writes and COMMIT; never automatically retry a write.
       if (isTransientDatabaseError(error))
         throw new ServiceUnavailableException();

@@ -1,6 +1,7 @@
 import type { ApiProcess } from './api-process';
 import {
   percentile,
+  mib,
   windowFailures,
   type Snapshot,
   type WindowMetrics,
@@ -37,7 +38,8 @@ export async function measure(
     failures: windowFailures(name, latencies, metrics, snapshot),
   };
   console.log(
-    `${name}: p95=${result.p95Ms.toFixed(1)}ms CPU=${result.cpuMsPerRequest.toFixed(1)}ms/request`,
+    `${name}: p95=${result.p95Ms.toFixed(1)}ms CPU=${result.cpuMsPerRequest.toFixed(1)}ms/request ` +
+      `RSS=${mib(metrics.peak.rss).toFixed(1)}MiB heapAfterGc=${mib(snapshot.memory.heapUsed).toFixed(2)}MiB throughput=${result.requestsPerSecond.toFixed(1)}req/s`,
   );
   return result;
 }

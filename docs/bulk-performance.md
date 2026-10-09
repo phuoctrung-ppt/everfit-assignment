@@ -5,15 +5,22 @@ Run `pnpm test:performance` to review Phase 03's existing bulk API under a large
 ## Commands
 
 ```sh
-# Standard screening: six mixed soak windows
+# Standard screening: six mixed soak windows, visible HTTP logs
 pnpm test:performance
 
-# Longer screening: thirty windows (2,400 measured mixed requests)
-PERF_ROUNDS=30 pnpm test:performance
+# Show actual WorkoutLoggingService start/completion/failure events
+PERF_LOG_LEVEL=debug pnpm test:performance
+
+# Quiet comparison with the recorded silent baseline
+PERF_LOG_LEVEL=silent PERF_ROUNDS=30 pnpm test:performance
 
 # Explicit report location; directory created automatically
 PERF_REPORT=artifacts/performance/bulk-local.json pnpm test:performance
 ```
+
+`PERF_LOG_LEVEL` defaults to `info` and accepts the application log levels (`fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`). Backend stdout/stderr are inherited by your terminal. Use `debug` to see `WorkoutLoggingService` events; `info` shows HTTP completion/error logs. The startup banner prints the isolated backend URL and PID, so its random port is explicit. Your existing port-3000 server receives no benchmark traffic. Each scenario prints p95, CPU/request, peak sampled RSS, post-GC heap, and throughput; the JSON report records the actual log level. Logging overhead is part of the measured run, so compare runs using the same level/output destination.
+
+Service debug events include only operation, entry/set counts, outcome, and duration. They omit user IDs, keys, bodies, and raw errors. Completion is emitted after the transaction commits; its duration includes transaction acquisition/work/commit, excludes earlier validation/fingerprinting and later HTTP serialization. Request IDs correlate service events with HTTP logs. For ordinary host development, `LOG_LEVEL=debug pnpm start:dev` enables the same service events on the application port.
 
 `PERF_ENTRIES` defaults to 51,000, accepts multiples of 100 from 51,000 through 1,000,000. `PERF_REQUESTS` defaults to 100 measured requests per scenario, accepts 100–1,000. `PERF_ROUNDS` defaults to 6, accepts 6–120. Reports default to timestamped files under ignored `artifacts/performance/`. Avoid running other builds/load tests alongside this command. Higher settings require more time and database disk space; entries and committed replay JSON intentionally accumulate throughout a run.
 
@@ -36,7 +43,7 @@ Every successful response is checked for shape, user, exercise, timestamps, set 
 
 ## Measurements and interpretation
 
-The compiled Nest application runs in a child process with production mode, silent logging, a ten-connection pool, normal 5s statement/3s lock timeouts, and a 512 MiB V8 old-space limit. A separate TypeScript parent generates HTTP requests and validates results. CPU/memory measurements belong to the API process; they exclude the parent, PostgreSQL, and the rest of the host. Metrics and GC controls use private IPC, never a public API endpoint.
+The compiled Nest application runs in a child process with production mode, the selected log level, a ten-connection pool, normal 5s statement/3s lock timeouts, and a 512 MiB V8 old-space limit. A separate TypeScript parent generates HTTP requests and validates results. CPU/memory measurements belong to the API process; they exclude the parent, PostgreSQL, and the rest of the host. Metrics and GC controls use private IPC, never a public API endpoint.
 
 - Raw request durations and p50/p95 use nearest-rank percentiles. Timing includes parent request serialization, loopback scheduling, and complete response download; response validation occurs afterward.
 - API CPU user/system milliseconds and CPU milliseconds/request come from `process.cpuUsage`. One-core CPU percentage is CPU time / wall time; it can exceed 100% when several process threads run.
@@ -64,7 +71,7 @@ Repeated validation and response parsing are profiling candidates: requests are 
 
 ## Measured local run — 2026-10-09
 
-Extended command: `PERF_ROUNDS=30 pnpm test:performance`. All diagnostic budgets and correctness checks passed. Environment: Node v24.21.0, PostgreSQL 17.11, Linux x64, Intel i5-1135G7, 8 logical CPUs, 39.0 GiB reported host RAM. Base application commit `6e6b680`; harness was an uncommitted working-tree addition. Production mode, silent logging, loopback HTTP. Total execution approximately 69 seconds; this is a short soak, not hours of endurance testing.
+Extended run used 30 windows with the then-default silent logging. Reproduce that logging mode with `PERF_LOG_LEVEL=silent PERF_ROUNDS=30 pnpm test:performance`. All diagnostic budgets and correctness checks passed. Environment: Node v24.21.0, PostgreSQL 17.11, Linux x64, Intel i5-1135G7, 8 logical CPUs, 39.0 GiB reported host RAM. Base application commit `6e6b680`; harness was an uncommitted working-tree addition. Production mode, silent logging, loopback HTTP. Total execution approximately 69 seconds; this is a short soak, not hours of endurance testing.
 
 Seed: primary user 51,000 entries/153,000 sets; secondary user 1,000/3,000. End: primary user 138,100 entries/1,024,000 sets and 1,381 idempotency records; secondary unchanged. Each scenario below has 100 measured requests after ten warmups; mixed soak has 30 × 80 requests.
 

@@ -1,19 +1,23 @@
 import { fork } from 'node:child_process';
 import { resolve } from 'node:path';
+import type { Environment } from '../../src/schemas/environment.schema';
 
-export async function startApiProcess(databaseUrl: string) {
+export async function startApiProcess(
+  databaseUrl: string,
+  logLevel: Environment['LOG_LEVEL'] = 'info',
+) {
   const child = fork(resolve('test/performance/api-worker.cjs'), [], {
     execArgv: ['--expose-gc', '--max-old-space-size=512'],
     env: {
       ...process.env,
       DATABASE_URL: databaseUrl,
       NODE_ENV: 'production',
-      LOG_LEVEL: 'silent',
+      LOG_LEVEL: logLevel,
       DB_POOL_MAX: '10',
       DB_STATEMENT_TIMEOUT_MS: '5000',
       DB_LOCK_TIMEOUT_MS: '3000',
     },
-    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
   const pending = new Map<
     number,

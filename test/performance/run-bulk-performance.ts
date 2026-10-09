@@ -9,6 +9,7 @@ import { BUDGETS, memoryTrend, type Snapshot } from './metrics';
 import { measure } from './measure';
 import { createScenarios } from './scenarios';
 import { bulkBody, SECONDARY_USER, runRequests, Workload } from './workload';
+import { EnvironmentSchema } from '../../src/schemas/environment.schema';
 
 function integer(name: string, fallback: number, min: number, max: number) {
   const value = process.env[name] ?? String(fallback);
@@ -17,6 +18,9 @@ function integer(name: string, fallback: number, min: number, max: number) {
   return +value;
 }
 async function main() {
+  const logLevel = EnvironmentSchema.shape.LOG_LEVEL.parse(
+    process.env.PERF_LOG_LEVEL ?? 'info',
+  );
   const rounds = integer('PERF_ROUNDS', 6, 6, 120);
   const requests = integer('PERF_REQUESTS', 100, 100, 1000);
   const entries = integer('PERF_ENTRIES', 51000, 51000, 1000000);
@@ -53,7 +57,7 @@ async function main() {
       ),
       api: {
         nodeEnv: 'production',
-        logLevel: 'silent',
+        logLevel,
         heapLimitMiB: 512,
         poolMax: 10,
         statementTimeoutMs: 5000,
@@ -76,13 +80,16 @@ async function main() {
       'API process CPU/memory only; PostgreSQL and load generator excluded',
       'RSS peaks sampled every 20ms; maxRSS is lifetime high-water mark',
       'GC occurs outside timed windows; finite soak cannot prove absence of leaks',
-      'Loopback closed-loop load, silent logging, one API process; no production SLO claim',
+      'Loopback closed-loop load, one API process; logging overhead included; no production SLO claim',
     ],
   };
   let stage = 'setup';
   try {
     database = await createPerformanceDatabase();
-    api = await startApiProcess(database.databaseUrl);
+    api = await startApiProcess(database.databaseUrl, logLevel);
+    console.log(
+      `Benchmark backend: ${api.url} (PID ${api.pid}, LOG_LEVEL=${logLevel}); POST /users/:userId/workout-entries/bulk`,
+    );
     const load = new Workload(api.url, abort.signal);
     stage = 'seed';
     console.log(`Loading ${entries} primary-user entries through bulk HTTP...`);

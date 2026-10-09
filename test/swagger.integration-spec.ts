@@ -39,6 +39,38 @@ describe('development API documentation', () => {
       .split('/')
       .at(-1);
     expect(schemas[schemaName].properties.data.type).toBe('array');
+    expect(
+      schemas[schemaName].properties.pagination.properties.hasMore.type,
+    ).toBe('boolean');
+    const endpoint = result.body.paths['/exercises'].get;
+    expect(endpoint.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'muscleGroup',
+          in: 'query',
+          required: false,
+          description: expect.stringContaining('Exact muscle-group name'),
+          schema: expect.objectContaining({ type: 'string', maxLength: 80 }),
+        }),
+        expect.objectContaining({
+          name: 'limit',
+          in: 'query',
+          required: false,
+          description: expect.stringContaining('default 20, maximum 100'),
+        }),
+        expect.objectContaining({
+          name: 'cursor',
+          in: 'query',
+          required: false,
+        }),
+      ]),
+    );
+    expect(endpoint.responses['400']).toBeDefined();
+    const health = result.body.paths['/health'].get;
+    expect(health.parameters ?? []).toEqual([]);
+    expect(schemas.HealthResponseDto.properties).not.toHaveProperty(
+      'pagination',
+    );
     expect(JSON.stringify(schemas[schemaName])).not.toContain('normalizedName');
     expect(
       result.body.paths['/exercises'].get.responses['503'].content[

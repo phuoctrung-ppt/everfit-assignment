@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CursorPageSchema } from './pagination.schema';
 
 export const ExerciseSchema = z.strictObject({
   id: z.uuid(),
@@ -6,9 +7,7 @@ export const ExerciseSchema = z.strictObject({
   muscleGroups: z.array(z.string().min(1).max(80)),
 });
 
-export const ExerciseListSchema = z.strictObject({
-  data: z.array(ExerciseSchema),
-});
+export const ExerciseListSchema = CursorPageSchema(ExerciseSchema);
 
 export type ExerciseDto = z.infer<typeof ExerciseSchema>;
 export type ExerciseList = z.infer<typeof ExerciseListSchema>;

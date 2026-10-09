@@ -32,7 +32,8 @@ describe('Unicode catalog normalization', () => {
   });
 
   it('backfills existing names using application normalization', async () => {
-    await runTestMigrations(database.databaseUrl, 'down');
+    await runTestMigrations(database.databaseUrl, 'down'); // Cursor index.
+    await runTestMigrations(database.databaseUrl, 'down'); // Normalization.
     const name = "İ O'S Press";
     const id = randomUUID();
     await service.pool.query(

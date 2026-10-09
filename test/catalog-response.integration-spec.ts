@@ -30,9 +30,12 @@ describe('catalog response boundary', () => {
 
   it('serves an empty catalog through the response serializer', async () => {
     repository.list.mockResolvedValue([]);
-    await request(app.getHttpServer()).get('/exercises').expect(200, {
-      data: [],
-    });
+    await request(app.getHttpServer())
+      .get('/exercises')
+      .expect(200, {
+        data: [],
+        pagination: { nextCursor: null, hasMore: false },
+      });
   });
 
   it('rejects malformed output with a sanitized 500 instead of sending invalid data', async () => {
@@ -44,6 +47,15 @@ describe('catalog response boundary', () => {
       .expect(500);
     expect(result.body.error.code).toBe('INTERNAL_ERROR');
     expect(JSON.stringify(result.body)).not.toContain('invalid-sensitive-id');
+  });
+
+  it('rejects malformed pagination before accessing the repository', async () => {
+    repository.list.mockClear();
+    await request(app.getHttpServer())
+      .get('/exercises?cursor=invalid')
+      .expect(400);
+    await request(app.getHttpServer()).get('/exercises?limit=101').expect(400);
+    expect(repository.list).not.toHaveBeenCalled();
   });
 
   it.each([

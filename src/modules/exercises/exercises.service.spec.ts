@@ -35,9 +35,11 @@ describe('ExercisesService', () => {
           muscleGroups: ['chest'],
         },
       ],
+      pagination: { nextCursor: null, hasMore: false },
     });
     expect(await service.list()).toEqual({
       data: [],
+      pagination: { nextCursor: null, hasMore: false },
     });
   });
 

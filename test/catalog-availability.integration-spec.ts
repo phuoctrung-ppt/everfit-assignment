@@ -43,8 +43,11 @@ describe('catalog database availability', () => {
     } finally {
       await locker.query('ROLLBACK');
     }
-    await request(app.getHttpServer()).get('/exercises').expect(200, {
-      data: [],
-    });
+    await request(app.getHttpServer())
+      .get('/exercises')
+      .expect(200, {
+        data: [],
+        pagination: { nextCursor: null, hasMore: false },
+      });
   });
 });

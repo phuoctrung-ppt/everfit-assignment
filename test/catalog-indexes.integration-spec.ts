@@ -49,12 +49,22 @@ describe('catalog index query plans', () => {
     },
   );
 
-  it('executes the full catalog joins and aggregation for all 10000 exercises', async () => {
-    const result = await client.query<ExplainRow>(
-      `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${LIST_EXERCISES_SQL}`,
-    );
-    expect(result.rows[0]?.['QUERY PLAN'][0].Plan['Actual Rows']).toBe(10000);
-  });
+  it.each([
+    [null, null, 21],
+    ['exercise 9000', '00000000-0000-0000-0000-000000000000', 21],
+  ])(
+    'uses the cursor index and bounds joined rows after %s',
+    async (name, id, limit) => {
+      const result = await client.query<ExplainRow>(
+        `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${LIST_EXERCISES_SQL}`,
+        [name, id, limit, null],
+      );
+      const plan = result.rows[0]?.['QUERY PLAN'][0].Plan;
+      expect(plan?.['Actual Rows']).toBe(21);
+      expect(JSON.stringify(plan)).toContain('exercises_cursor_idx');
+      if (name) expect(JSON.stringify(plan)).toContain('Index Cond');
+    },
+  );
 
   it('uses the existing reverse mapping index for selective muscle-group lookup', async () => {
     const result = await client.query<ExplainRow>(

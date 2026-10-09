@@ -183,16 +183,15 @@ describe('workout schema', () => {
   it('reruns migrations as a no-op and rolls back/reapplies an empty isolated schema', async () => {
     await expect(runTestMigrations(database.databaseUrl)).resolves.toBe(0);
     await pool.query('TRUNCATE workout_entries, exercises CASCADE');
-    await expect(runTestMigrations(database.databaseUrl, 'down')).resolves.toBe(
-      1,
-    );
-    await expect(runTestMigrations(database.databaseUrl, 'down')).resolves.toBe(
-      1,
-    );
+    for (let migration = 0; migration < 3; migration++) {
+      await expect(
+        runTestMigrations(database.databaseUrl, 'down'),
+      ).resolves.toBe(1);
+    }
     const result = await pool.query<{ name: string | null }>(
       "SELECT to_regclass('public.workout_entries')::text AS name",
     );
     expect(result.rows[0]?.name).toBeNull();
-    await expect(runTestMigrations(database.databaseUrl)).resolves.toBe(2);
+    await expect(runTestMigrations(database.databaseUrl)).resolves.toBe(3);
   });
 });

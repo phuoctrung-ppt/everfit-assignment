@@ -71,6 +71,7 @@ describe('exercise catalog against PostgreSQL', () => {
           muscleGroups: ['glutes', 'quadriceps'],
         },
       ],
+      pagination: { nextCursor: null, hasMore: false },
     });
   });
 

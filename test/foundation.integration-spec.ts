@@ -41,6 +41,12 @@ describe('foundation against PostgreSQL', () => {
     expect(result.headers['x-request-id']).not.toBe('untrusted');
   });
 
+  it('does not apply pagination validation or response wrapping to an opted-out route', async () => {
+    await request(app.getHttpServer())
+      .get('/health?cursor=invalid&limit=0')
+      .expect(200, { status: 'ok' });
+  });
+
   it('rolls back a throwing callback and releases its client', async () => {
     const id = randomUUID();
     await expect(

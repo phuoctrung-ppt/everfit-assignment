@@ -1,7 +1,19 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import type { PoolClient } from 'pg';
+import { ZodValidationException } from 'nestjs-zod';
 import { isTransientDatabaseError } from '../../database/database-errors';
-import type { ExerciseList } from '../../schemas/exercise.schema';
+import type { ExerciseDto } from '../../schemas/exercise.schema';
+import {
+  ExerciseCursorSchema,
+  ExerciseCursorQuerySchema,
+  type ExerciseListQuery,
+} from '../../schemas/exercise-query.schema';
+import {
+  DEFAULT_PAGE_SIZE,
+  decodeCursor,
+  encodeCursor,
+  type CursorPage,
+} from '../../schemas/pagination.schema';
 import { normalizeExerciseName, type Exercise } from './exercise.types';
 import { ExercisesRepository } from './exercises.repository';
 
@@ -9,14 +21,42 @@ import { ExercisesRepository } from './exercises.repository';
 export class ExercisesService {
   constructor(private readonly exercises: ExercisesRepository) {}
 
-  async list(): Promise<ExerciseList> {
-    const exercises = await this.runQuery(() => this.exercises.list());
+  async list(
+    query: ExerciseListQuery = { limit: DEFAULT_PAGE_SIZE },
+  ): Promise<CursorPage<ExerciseDto>> {
+    const validation = ExerciseCursorQuerySchema.safeParse({
+      cursor: query.cursor,
+      muscleGroup: query.muscleGroup,
+    });
+    if (!validation.success) throw new ZodValidationException(validation.error);
+    const cursor = query.cursor
+      ? ExerciseCursorSchema.parse(decodeCursor(query.cursor))
+      : undefined;
+    const exercises = await this.runQuery(() =>
+      this.exercises.list(query.limit, cursor, validation.data.muscleGroup),
+    );
+    const hasMore = exercises.length > query.limit;
+    const page = exercises.slice(0, query.limit);
+    const last = page.at(-1);
     return {
-      data: exercises.map(({ id, name, muscleGroups }) => ({
+      data: page.map(({ id, name, muscleGroups }) => ({
         id,
         name,
         muscleGroups,
       })),
+      pagination: {
+        hasMore,
+        nextCursor:
+          hasMore && last
+            ? encodeCursor({
+                v: 1,
+                resource: 'exercises',
+                normalizedName: last.normalizedName,
+                id: last.id,
+                muscleGroup: validation.data.muscleGroup ?? null,
+              })
+            : null,
+      },
     };
   }
 

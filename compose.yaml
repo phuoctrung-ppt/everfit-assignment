@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:17.11-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-everfit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-everfit}
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-everfit}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-everfit}
+    command: ['node', 'scripts/migrate.cjs', 'up']
+    depends_on:
+      postgres:
+        condition: service_healthy
+  api:
+    build: .
+    init: true
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-everfit}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-everfit}
+      NODE_ENV: production
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-5000}
+      DB_LOCK_TIMEOUT_MS: ${DB_LOCK_TIMEOUT_MS:-3000}
+    ports:
+      - '127.0.0.1:${PORT:-3000}:3000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    stop_grace_period: 15s
+volumes:
+  postgres-data:

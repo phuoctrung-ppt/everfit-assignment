@@ -1,0 +1,10 @@
+.git
+.agents
+node_modules
+dist
+coverage
+.env
+.env.*
+*.log
+plans
+Backend Engineer.pdf

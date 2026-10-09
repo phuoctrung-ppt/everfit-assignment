@@ -1,0 +1,4 @@
+interface:
+  display_name: "NestJS Skills"
+  short_description: "Task-focused NestJS guidance with lazy context loading"
+  default_prompt: "Use $nestjs-skills to complete this NestJS task with relevant best practices."

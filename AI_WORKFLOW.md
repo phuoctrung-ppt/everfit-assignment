@@ -245,3 +245,16 @@ Verification: lint, Nest build, full TypeScript checking, 168 unit tests and 121
 Phase 03 is complete; history, personal records, broader performance verification, and final delivery remain planned. No deployment, push, or publishing performed. Local plan/report artifacts retain the existing Git exclusion.
 
 Unresolved questions: none for Phase 03.
+
+
+## 7. Phase 03 bulk performance review — 2026-10-09
+
+User invoked code-review and requested bulk CPU/memory testing with more than 50,000 entries per user. Applied code-review, security, NestJS context-builder, and database skills. An independent reviewer inspected the existing write path and the new harness; source inspection found request-bounded allocations and no history-sized reads. Repeated validation and conflict replay parsing are CPU candidates, but measured budgets did not justify application changes.
+
+Added opt-in `pnpm test:performance`: isolated PostgreSQL database, synthetic mixed-unit HTTP loading, compiled Nest child with private IPC instrumentation, latency/CPU/event-loop/memory/pool diagnostics, fixed predeclared budgets, raw JSON reports, and a configurable soak. Parent generation/validation is outside measured API CPU/memory; closed-loop timing limitations are documented. No dependency, migration, or production source change.
+
+Initial six-window run passed. Review then separated committed replay from fresh-key contention, renamed unknown-exercise failures as reservation rollback, and documented that they do not exercise rollback after writing workout sets. Added fresh-key groups with response-digest equality and exact single-commit counts. Parent final review tightened cleanup so forced worker termination fails the benchmark. A final six-window run passed with clean shutdown; longer 30-window evidence is also preserved.
+
+Extended run: seed 51,000 primary entries/153,000 sets plus 1,000 secondary entries; end 138,100 primary entries/1,024,000 sets. Maximum 100-entry/1,000-set batch p95: 91.9ms at concurrency 1, 321.7ms at concurrency 4. API CPU/request: 29.9ms / 39.6ms respectively. Post-GC heap 24.14→24.26MiB over 30 mixed windows; peak sampled RSS 261.6MiB; external memory 2.82MiB remained flat; pool clients returned at every checkpoint. Finite approximately 69-second run provides screening evidence, not proof of all leak absence or production capacity. PostgreSQL CPU is not measured. Persistent idempotency storage growth is expected and reported separately.
+
+Verification: lint, Nest build, TypeScript, 171 unit tests, 121 integration tests passed; benchmark metrics have three focused regression tests. Independent reviewer matched committed summary values to raw JSON and found no blockers. Local raw reports live under the Git-excluded bulk performance plan; docs/bulk-performance.md preserves methodology and reviewed results. History/PR benchmarks remain Phase 06 work. No unresolved diagnosis required problem-solving. Existing Compose edit and assignment PDF preserved.

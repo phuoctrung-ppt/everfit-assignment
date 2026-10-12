@@ -4,6 +4,7 @@ import { performance } from 'node:perf_hooks';
 import { BulkWorkoutResponseSchema } from '../../src/schemas/workout-logging.schema';
 import type { BulkWorkoutDto } from '../../src/schemas/workout.schema';
 import { expectedPersistenceDigest } from './persistence-oracle';
+import type { BulkTransport } from './retry-transport';
 
 export const PRIMARY_USER = 'performance-primary';
 export const SECONDARY_USER = 'performance-secondary';
@@ -40,6 +41,7 @@ export class Workload {
   constructor(
     private readonly url: string,
     private readonly signal?: AbortSignal,
+    private readonly send: BulkTransport = fetch,
   ) {}
 
   async post(
@@ -51,7 +53,7 @@ export class Workload {
     replay?: unknown,
   ) {
     const started = performance.now();
-    const response = await fetch(
+    const response = await this.send(
       `${this.url}/users/${user}/workout-entries/bulk`,
       {
         method: 'POST',

@@ -19,11 +19,11 @@ export async function createPerformanceDatabase() {
       }),
     ),
   );
-  const close = async () => {
+  const close = async (retain = false) => {
     try {
       await service.onApplicationShutdown();
     } finally {
-      await database.close();
+      if (!retain) await database.close();
     }
   };
   try {

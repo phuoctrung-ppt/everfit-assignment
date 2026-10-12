@@ -384,3 +384,29 @@ CSV upload and one worker remain a [documented proposal](docs/csv-import-design.
 with crash/checkpoint/idempotency cases; no CSV throughput or implementation is
 claimed. Existing working-tree edits were preserved; no commit or publication
 was performed in this review session.
+
+## 14. Retained batch and retry verification — 2026-10-12
+
+The user asked to execute and verify50,000 records with benchmark processing in
+separate processes, batches and retry after a record error. Codex added an opt-in
+runner reusing the real bulk API, isolated database factory and independent
+persistence oracle. One delegated task implemented a503-only bounded retry
+transport; follow-up review checked the runner and actual PostgreSQL failure
+injection. No CSV endpoint or production queue was introduced.
+
+The runner submits500 batches of100 entries. One fixture has an unknown exercise:
+it must fail400, preserve prior data and succeed after explicit correction. A
+test-only SQL trigger then raises a transient error on one set; rollback is
+verified before the unchanged batch/key is retried. Nontransactional sequence
+values prove the failed transaction had already written entry/set rows. Restart
+replay is checked with a different API PID and complete data verification.
+
+Reviewer feedback improved two failure paths: bound the fault-control database
+client's timeouts, and preserve partial attempts/recovery evidence with sanitized
+failure classification. A regression case verifies partial attempts remain
+available if the rollback inspection itself fails.
+
+Observed50,000 entries/150,000 sets/500 keys,22.379s load,61.07ms batch p95;
+faults recovered and restart replay added no rows. A separate read-only `psql`
+script verified all expected values after all benchmark/API processes stopped.
+The database was retained as requested. See [results and reproduction](docs/batch-retry-benchmark.md).

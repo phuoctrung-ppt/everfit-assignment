@@ -15,6 +15,7 @@
     "test:unit": "jest --config jest.config.ts",
     "test:performance": "pnpm build && node --env-file-if-exists=.env -r ts-node/register scripts/benchmark-workouts.ts",
     "test:performance:bulk": "pnpm build && node --env-file-if-exists=.env -r ts-node/register test/performance/run-bulk-performance.ts",
+    "test:performance:batch-retry": "pnpm build && node --env-file-if-exists=.env -r ts-node/register test/performance/run-batch-retry.ts",
     "test:integration": "node --env-file-if-exists=.env node_modules/jest/bin/jest.js --config test/jest-integration.config.ts",
     "db:migrate": "node --env-file-if-exists=.env scripts/migrate.cjs up",
     "db:rollback": "node --env-file-if-exists=.env scripts/migrate.cjs down",

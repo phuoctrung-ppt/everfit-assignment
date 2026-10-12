@@ -238,6 +238,15 @@ This creates and cleans up an isolated database using `TEST_DATABASE_ADMIN_URL`.
 
 For bulk CPU/memory screening, run `pnpm test:performance:bulk`; for visible service events, run `PERF_LOG_LEVEL=debug pnpm test:performance:bulk`; for a quiet extended soak, run `PERF_LOG_LEVEL=silent PERF_ROUNDS=30 pnpm test:performance:bulk`. The command creates and cleans up an isolated test database, loads 51,000 entries through HTTP, and writes a JSON report with latency, CPU/request, sampled RSS, retained-heap trend, and correctness checks. The startup banner prints its isolated backend port/PID. HTTP logs are visible by default (`info`); debug adds service start/completion/failure events without request bodies or keys. Metrics remain visible at every log level. It is excluded from routine Jest integration runs. See [bulk performance methodology and budgets](docs/bulk-performance.md). A finite soak can detect suspicious retained growth; it cannot prove absence of all memory leaks.
 
+To write exactly 50,000 entries through HTTP in 500 sequential batches, verify
+single-record failure/rollback/retry, restart the separate API process, and keep
+the database for SQL inspection, run
+`pnpm test:performance:batch-retry --retain-database --output artifacts/performance/batch-retry-retained.json`.
+See [the batch/retry benchmark](docs/batch-retry-benchmark.md) for retry policy,
+measurements and database inspection commands. It creates its own database;
+omitting `--retain-database` restores automatic cleanup. This is a benchmark
+client, not the proposed CSV import worker.
+
 ## Dependency choices and compatibility sources
 
 Exact dependency versions are in `package.json` and `pnpm-lock.yaml`; image tags are pinned in Compose/Dockerfile. The foundation uses NestJS **11.2.7**, PostgreSQL **17.11**, TypeScript **5.9.3**, pg **8.23.1**, node-pg-migrate **9.0.0**, Zod **4.6.5**, nestjs-zod **5.5.0**, nestjs-pino **5.3.1**, and Jest **30.5.2**. Install scripts for optional native tooling and Nest's postinstall message are disabled in `pnpm-workspace.yaml`; the application uses plain JavaScript PostgreSQL and TypeScript compilation.

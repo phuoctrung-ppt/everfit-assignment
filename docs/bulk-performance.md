@@ -1,5 +1,10 @@
 # Bulk logging performance test
 
+For an exact 50,000-entry HTTP load with single-record rollback/retry and a
+retained database, use the separate [batch/retry benchmark](batch-retry-benchmark.md).
+The screening harness below continues to seed51,000 entries and then grow the
+dataset while measuring concurrency/soak scenarios.
+
 Run `pnpm test:performance:bulk` to review Phase 03's existing bulk API under a large persisted dataset. This opt-in command builds the application, creates a random isolated PostgreSQL test database, loads 51,000 entries/153,000 sets for one user through HTTP, and adds 1,000 entries/3,000 sets for another user. It requires the existing `TEST_DATABASE_ADMIN_URL`; it never targets the development `DATABASE_URL` for writes or cleanup. Generated databases are dropped afterward. Synthetic fixtures span four exercises, six months, timestamp ties, and mixed kg/lb/zero weights.
 
 ## Commands

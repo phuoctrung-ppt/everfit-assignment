@@ -34,7 +34,18 @@ describe('development API documentation', () => {
       '/users/{userId}/personal-records/compare',
       '/users/{userId}/workout-entries',
       '/users/{userId}/workout-entries/bulk',
+      '/users/{userId}/workout-entries/bulk/csv',
+      '/users/{userId}/workout-entries/imports/{importId}',
     ]);
+    const upload =
+      result.body.paths['/users/{userId}/workout-entries/bulk/csv'].post;
+    expect(
+      upload.requestBody.content['multipart/form-data'].schema,
+    ).toMatchObject({
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary' } },
+    });
+    expect(upload.responses['202']).toBeDefined();
     const schemas = result.body.components.schemas;
     expect(schemas.HealthResponseDto.properties.status.enum).toEqual(['ok']);
     expect(schemas.ErrorResponseDto.required).toContain('requestId');

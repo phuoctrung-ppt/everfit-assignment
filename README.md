@@ -14,7 +14,7 @@ flowchart LR
     Init[One-shot migrations + catalog seed] --> PG
 ```
 
-Controllers validate HTTP contracts; services own transactions and calculations; repositories own SQL. PostgreSQL provides atomic bulk writes, user/key uniqueness, relational constraints, and on-demand record selection. Direct `pg` queries keep those guarantees visible. There is no ORM, queue, cache, or authentication; the supplied user ID selects data and does not establish identity.
+Controllers validate HTTP contracts; services own transactions and calculations; repositories own SQL. PostgreSQL provides atomic bulk writes, user/key uniqueness, relational constraints, and on-demand record selection. Direct `pg` queries keep those guarantees visible. CSV imports use a durable PostgreSQL job queue and one separate worker. There is no ORM, external queue service, cache, or authentication; the supplied user ID selects data and does not establish identity.
 
 ## Local startup
 
@@ -224,7 +224,7 @@ pnpm test:integration --runInBand test/workout-persistence.integration-spec.ts t
 
 Integration tests require `TEST_DATABASE_ADMIN_URL` pointing to a dedicated local/test PostgreSQL server. They create random `everfit_test_<32 hex>` databases, apply migrations, and drop only their generated databases on cleanup. Never point this variable at a production server. No test uses the development database as its cleanup target.
 
-Persistence tests use a separate PostgreSQL client to compare all stored entry/set/idempotency columns against independent expectations after single/bulk writes, application restart, and replay. The bulk benchmark also checks every persisted entry/set at seed and final checkpoints, including exact fourteen-decimal kg, with an independent integer oracle. See the [assignment review](docs/assignment-review.md) for evidence and the [single-worker CSV proposal](docs/csv-import-design.md) for an optional upload extension and failure/recovery test cases; CSV upload is not implemented.
+Persistence tests use a separate PostgreSQL client to compare all stored entry/set/idempotency columns against independent expectations after single/bulk writes, application restart, and replay. The bulk benchmark also checks every persisted entry/set at seed and final checkpoints, including exact fourteen-decimal kg, with an independent integer oracle. See the [assignment review](docs/assignment-review.md) for evidence and the [CSV upload and worker](docs/csv-import-design.md) for the implemented multipart import contract and failure/recovery tests.
 
 Tests cover configuration, startup failure, real database readiness, transaction rollback, exact NUMERIC values, session timeouts, schema constraints, repeated migration, rollback/reapply, and the HTTP validation/error boundary. Phase 02 adds exact conversion and schema boundary cases, catalog HTTP/lookup/seeding checks, and development-only Swagger checks. Catalog lookup reuses the unique B-tree index on `normalized_name`; joins reuse the mapping primary key and reverse index. EXPLAIN integration tests execute the repository SQL for single/multiple-name resolution and first/subsequent cursor pages over 10,000 exercises. The cursor queries use `exercises_cursor_idx` and return at most the requested lookahead page. HTTP tests cover traversal, page boundaries, Unicode cursors, concurrent inserts/deletes, and sanitized pagination validation. Phase 03 adds fingerprint identity, atomic single/bulk writes, indexed validation, exact stored values, persisted replay, conflicts, restart/catalog changes, concurrent writers, maximum request bounds, and repository/commit failure recovery tests. Phase 03 now has a separately runnable bulk performance harness loading more than 50,000 entries per user, measuring API CPU/memory and replay/rollback behavior. Phase 04 adds strict history query/cursor tests and PostgreSQL coverage for filter composition, literal wildcard/SQL-looking search text, UTC boundaries, complete tied-date pagination, user/filter/unit cursor binding, changing page sizes, mixed-unit originals, concurrent inserts, and lock-timeout recovery. Phase 05 adds formula/query tests and PostgreSQL coverage for independent record winners, exact mixed-unit ties, display-rounding ties, period overlap/boundaries, signed differences, zero versus absent records, strict query validation, and lock-timeout recovery. Phase 06 adds ten-client contention across two app instances, observed PostgreSQL lock independence, compressed-body limits, additional numeric/calendar boundaries, and cursor tampering with user isolation. Read performance is checked separately; production capacity remains unmeasured.
 
@@ -245,7 +245,7 @@ the database for SQL inspection, run
 See [the batch/retry benchmark](docs/batch-retry-benchmark.md) for retry policy,
 measurements and database inspection commands. It creates its own database;
 omitting `--retain-database` restores automatic cleanup. This is a benchmark
-client, not the proposed CSV import worker.
+client; the separate CSV benchmark is documented below.
 
 ## Dependency choices and compatibility sources
 
@@ -269,3 +269,42 @@ The measured local p95 values are evidence for the documented dataset at concurr
 Stateless API replicas can share PostgreSQL and the idempotency table; uniqueness coordinates retries across processes. Budget the sum of replica connection pools against database capacity, apply admission control/rate limits, and use a pooler only after measuring connection pressure. Add authenticated tenant authorization before exposing real client data. Monitor request latency, lock waits, database CPU/I/O, pool saturation, and storage growth; exercise backups and restore.
 
 History reads stay page-bounded, while arbitrary-range records still scan matching sets. Tune indexes and queries against realistic cardinalities first. Read replicas require explicit read-after-write/replication-lag behavior. Caching needs user/filter/unit keys and invalidation; precomputed records cannot alone answer arbitrary periods. Idempotency responses grow indefinitely in this assignment: a future retention policy must define the retry window before pruning. Cursor traversal is not a snapshot, especially when catalog names change. These are documented next steps, not implemented production guarantees.
+
+## CSV bulk upload
+
+JSON bulk logging remains `POST /users/:userId/workout-entries/bulk`. To upload a
+file of up to 50,000 entries (150,000 sets, 32 MiB), use multipart field `file`:
+
+```bash
+pnpm db:migrate
+pnpm build
+# Run alongside the API in another terminal; Compose includes this service.
+pnpm start:import-worker
+
+curl -X POST http://localhost:3000/users/athlete-1/workout-entries/bulk/csv \
+  -H 'Idempotency-Key: workouts-csv-001' \
+  -F 'file=@data/workouts-50000.csv;type=text/csv'
+curl http://localhost:3000/users/athlete-1/workout-entries/imports/IMPORT_UUID
+```
+
+The committed [sample CSV](data/workouts-50000.csv) contains 50,000 workout
+entries with three sets each: **150,000 data rows plus the header**, 8,816,726 bytes.
+It uses the seeded Bench Press exercise and the exact benchmark dataset.
+
+Upload returns **202 queued**, then the worker validates the entire CSV and writes
+batches of at most 100 entries/1,000 sets. Check `status=completed`,
+`processedEntries` and `processedSets` for completion. Invalid files write no
+workouts; a runtime failure after committed batches can leave partial progress.
+The CSV header is `entryRef,date,exerciseName,setPosition,reps,weight,unit`, with
+one row per set. See [CSV contract and recovery](docs/csv-import-design.md) for
+examples, retry semantics, limits and operational trade-offs.
+
+```bash
+pnpm test:performance:csv --retain-database \
+  --output=artifacts/performance/csv-import-retained.json
+```
+
+This benchmark uploads one actual file to an API process, runs one separate
+worker, injects a transient SQL record failure, and checks every persisted value
+with independent SQL. Earlier JSON bulk benchmarks did not test CSV upload.
+See [measured CSV results and retained database](docs/csv-import-benchmark.md).

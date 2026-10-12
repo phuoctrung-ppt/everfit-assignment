@@ -380,8 +380,8 @@ sets at completion; all nine 50,000-entry read scenarios passed. Commands,
 timings and limitations are in [the review](docs/assignment-review.md).
 
 The PDF requires large-dataset performance, not a single 50,000-entry request.
-CSV upload and one worker remain a [documented proposal](docs/csv-import-design.md),
-with crash/checkpoint/idempotency cases; no CSV throughput or implementation is
+At this review stage, CSV upload and one worker were a proposal (now implemented
+in the [CSV follow-up](docs/csv-import-design.md)); no CSV throughput or implementation was
 claimed. Existing working-tree edits were preserved; no commit or publication
 was performed in this review session.
 
@@ -410,3 +410,33 @@ Observed50,000 entries/150,000 sets/500 keys,22.379s load,61.07ms batch p95;
 faults recovered and restart replay added no rows. A separate read-only `psql`
 script verified all expected values after all benchmark/API processes stopped.
 The database was retained as requested. See [results and reproduction](docs/batch-retry-benchmark.md).
+
+
+## 15. Actual CSV upload and durable worker — 2026-10-12
+
+User identified that prior tests sent JSON and did not implement CSV upload.
+Added multipart bulk/csv plus status routes, PostgreSQL source/job/staging storage,
+and one separate worker process. Parser and worker implementation were delegated
+with separate file ownership; a third task built a real-file 50,000-entry runner.
+The parent integrated controllers/schema/migration, failure tests and documentation.
+
+Whole-file validation precedes workout writes. Each batch transaction combines
+entry/set inserts, progress and staging deletion. A session advisory lock keeps
+one active worker; restart resumes committed checkpoints. Transient operations
+retry at most three attempts, while invalid input and permanent SQL failures
+fail with sanitized errors. Source/staging cleanup is atomic with terminal state.
+
+Independent review found a later-record byte-limit bypass caused by the parser
+library's cumulative byte metadata, and missing HTTP 503 translation for temporary
+DB failures. Fixed with an explicit record boundary, regression cases after
+multiple preceding records, the existing DB error classifier, and real table-lock
+HTTP tests. Migration and Swagger expectations were updated for the new schema/routes.
+
+Actual multipart benchmark saved 50,000 entries/150,000 sets in 500 batches;
+18.005 seconds from upload through completion, including one injected SQL failure
+and successful retry. Restart replay preserved all IDs and values. Independent
+psql verification passed after all benchmark processes stopped. Database and local
+artifacts retained; see [CSV benchmark](docs/csv-import-benchmark.md).
+
+Final verification: 386 unit and 285 PostgreSQL integration tests passed, including
+real worker crash recovery. Build, lint and TypeScript checks passed.

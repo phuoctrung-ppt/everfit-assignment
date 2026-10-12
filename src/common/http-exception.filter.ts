@@ -36,10 +36,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const res = http.getResponse<Response>();
     const status =
       exception instanceof HttpException ? exception.getStatus() : 500;
-    const error = responses[status] ?? {
-      code: 'HTTP_ERROR',
-      message: 'Request failed',
-    };
+    const error =
+      status === 413 && req.is('multipart/form-data')
+        ? { code: 'PAYLOAD_TOO_LARGE', message: 'CSV file exceeds 32 MiB' }
+        : (responses[status] ?? {
+            code: 'HTTP_ERROR',
+            message: 'Request failed',
+          });
     const details =
       exception instanceof ZodValidationException
         ? (exception.getZodError() as ZodError).issues.map((issue) => ({

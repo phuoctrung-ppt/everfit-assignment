@@ -1,48 +1,40 @@
-# CSV import with one worker — proposal
+# CSV upload and one import worker
 
-Status: design and acceptance cases only; no upload endpoint, queue, CSV parser,
-or import worker is implemented. The assignment requires efficient endpoints over
-50,000+ workout entries per user. Existing JSON bulk logging accepts 100 entries
-and 1,000 sets per atomic request; 50,000 entries fit into 500 requests at three
-sets per entry. CSV is an additional ingestion option.
+Implemented: `POST /users/:userId/workout-entries/bulk/csv` accepts multipart
+field `file` and `Idempotency-Key`. It returns **202** with `{data: {id, status,
+...}}` after the exact file and job are durably stored in PostgreSQL. Poll
+`GET /users/:userId/workout-entries/imports/:importId` until `completed` or `failed`.
+202 means queued, not that workouts have been saved.
 
-## Suggested scope
+Existing `POST .../bulk` continues to accept JSON, returning 201 after an atomic
+request of at most 100 entries and 1,000 sets. Previous bulk benchmark reports
+measure JSON HTTP requests; they do not demonstrate CSV upload.
 
-Use one separate Node/Nest worker process, concurrency 1, with durable import jobs
-in the existing PostgreSQL database. Keep HTTP API and worker lifecycles separate.
-No Redis is necessary for this initial design; reassess if queue requirements grow.
-One worker bounds import concurrency but does not establish import throughput or
-protect reads from database I/O contention. Measure those together before sizing.
+## Running
 
-```mermaid
-flowchart LR
-    CSV[CSV upload] --> API[HTTP API]
-    API --> Files[Durable file storage]
-    API --> Jobs[(PostgreSQL import jobs)]
-    Jobs --> Worker[One worker / concurrency 1]
-    Files --> Worker
-    Worker --> Stage[Validate and stage complete file]
-    Stage --> Bulk[Bounded idempotent batches]
-    Bulk --> Workouts[(Workout entries and sets)]
-    Client[Client polling] --> Status[Import status API]
-    Status --> Jobs
+Apply migration `004-csv-imports.cjs` with `pnpm db:migrate`, build, then run
+`pnpm start` and `pnpm start:import-worker` in separate terminals. Docker Compose
+starts the `import-worker` service alongside the API after migration/seed.
+The worker holds a PostgreSQL session advisory lock on its dedicated connection;
+a second active worker for the same database exits unsuccessfully. API processes
+can enqueue jobs while no worker is running; the queue survives API restarts.
+
+```bash
+curl -X POST http://localhost:3000/users/athlete-1/workout-entries/bulk/csv \
+  -H 'Idempotency-Key: training-csv-001' \
+  -F 'file=@workouts.csv;type=text/csv'
+
+curl http://localhost:3000/users/athlete-1/workout-entries/imports/IMPORT_UUID
 ```
 
-Proposed routes:
-
-- `POST /users/:userId/workout-imports`: multipart `file` plus `Idempotency-Key`;
-  respond 202 with import ID/status URL after durable upload and job creation.
-- `GET /users/:userId/workout-imports/:importId`: queued/validating/running/
-  completed/failed, parsed rows, validated entries, committed entries/sets,
-  retry attempt, and bounded errors with record/column positions.
-
-These routes do not exist yet. A 202 acknowledges queued work, not committed
-workouts. Scope job lookup by route user; authentication remains outside the
-assignment. Any future production deployment needs authenticated ownership.
+Swagger documents the file upload. Filenames and client MIME labels are not used
+as paths or trusted as validation. CSV content is validated by the worker.
+User IDs are validated and status queries are scoped by user ID. Authentication
+remains outside assignment scope; route scoping is not authentication.
 
 ## File contract
 
-Use one logical CSV record per set, with header:
+One logical record per set; exact ordered header:
 
 ```csv
 entryRef,date,exerciseName,setPosition,reps,weight,unit
@@ -51,98 +43,84 @@ w1,2026-01-01T08:00:00.000Z,Bench Press,2,6,60,kg
 w2,2026-01-02T08:00:00.000Z,Squat,1,5,80,kg
 ```
 
-Thus 50,000 workouts × 3 sets means 150,000 CSV records, excluding the header.
-Require contiguous records per `entryRef`, identical date/exercise within an
-entry, unique sequential positions starting at 1, and at most 100 sets/entry.
-Different `entryRef` values can intentionally represent identical workouts.
-Reject a reference appearing again after its group closes. Route user owns the
-entire file; no per-row user override. Parse UTF-8/BOM, LF/CRLF, quoted commas,
-escaped quotes, and quoted newlines with a maintained CSV parser, not `split(',')`.
-Convert numeric text explicitly, then apply the existing strict workout schemas.
+50,000 workout entries with three sets each means **150,000 data records** in the
+CSV, plus the header. `entryRef` groups contiguous rows; it uses 1–128 ASCII
+letters, digits, underscores or hyphens. Each group has identical date/exercise,
+positions 1 through N without gaps, and at most 100 sets. A closed reference
+cannot appear again. Different references may intentionally describe identical
+workouts. References are local to a file, not persisted workout IDs.
 
-Initial proposed limits: one file, 32 MiB, 50,000 entries, 150,000 sets, 64 KiB
-per logical record; make these explicit configuration and test the exact limits.
-Byte, row and entry limits are independent. Reject unsupported headers, malformed
-CSV, invalid UTF-8/NUL, unknown exercises, non-UTC timestamps, and invalid numbers.
+Limits: one file, 32 MiB, 50,000 entries, 150,000 sets, 64 KiB per logical parser
+record. No additional multipart fields. UTF-8 (optional BOM), LF/CRLF, quoted
+commas/newlines and escaped quotes are supported by `csv-parse` 7.0.3. Reject
+invalid UTF-8/NUL, blank records, unexpected headers/columns, empty/header-only
+files, unknown exercises and values rejected by shared workout schemas.
+Reps/positions are positive integer text. Weight is nonnegative decimal text
+with at most six fractional digits. Scientific notation, surrounding numeric
+whitespace, Infinity and coercible empty values are rejected. Dates use the
+existing UTC contract. Units are `kg` or `lb`.
 
-## Durability and retries
+## Processing and recovery
 
-1. Reserve an upload row with a generated file key and ownership lease before
-   streaming to a persistent shared volume (single host) or object storage
-   (multiple hosts). Finish and hash the immutable file before exposing the queued
-   job. Never trust an uploaded filename as a path.
-   Bound multipart fields/parts/bytes separately from the existing JSON body cap.
-2. Enforce unique `(user_id, idempotency_key)` with a file digest: same key/digest
-   returns the same job; changed digest conflicts. Job attachment locks the upload
-   row and atomically changes `ready` to `attached` with job creation. Cleanup
-   claims only expired, unattached upload rows by changing their state to
-   `deleting` under the same row lock before deleting the file; attachment refuses
-   that state. An uploader that lost its lease cannot create a job or return 202.
-   Retry failed deletions; retain attached files for retry. This prevents cleanup
-   racing a delayed job-creation transaction; an age threshold alone is inadequate.
-3. Claim a queued job in a short transaction; persist attempt/lease ownership.
-   A lease heartbeat and attempt token allow restart recovery and prevent stale
-   attempts from overwriting newer job status. A queue claim can use
-   `FOR UPDATE SKIP LOCKED`; PostgreSQL documents its queue use and warns against
-   treating it as a consistent general read. [PostgreSQL SELECT](https://www.postgresql.org/docs/17/sql-select.html)
-4. Parse and validate into persistent staging rows keyed by job/entry ordinal.
-   Mark validation complete only after EOF and all checks succeed. Invalid final
-   records leave zero workout writes. Persist immutable validated batches so
-   retries preserve their content and boundaries. Persist resolved exercise IDs,
-   not just names, during validation. Each write transaction must verify that the
-   name still resolves to its staged ID under catalog row locks held through the
-   insert; fail explicitly on a rename/reassignment. The current logging service
-   does not accept an expected-ID map: implementation must add this internal
-   check before reusing it, or use an internal ID-based write operation with the
-   same validation/transaction/idempotency guarantees. A separate preflight
-   lookup is insufficient because the mapping can change before the insert.
-5. Write sequential batches of at most 100 entries AND 1,000 sets without splitting
-   an entry. Reuse the logging service with a stable key per job/batch, then save
-   the checkpoint. A crash after commit but before checkpoint replays that same
-   key; it must not duplicate entries. The existing logging service owns its
-   transaction, so checkpoint updates are a separate transaction and must tolerate
-   this gap. Reserve import-generated keys from manual requests in the future
-   implementation, or introduce a separate internal idempotency namespace.
-6. Retry transient failures with bounded backoff; use the same keys for uncertain
-   commit outcomes. Stop stale attempts between batches. Mark completion only
-   after all batches are committed and counters agree. Persist committed progress
-   on failure; retry resumes it. Never claim file-wide rollback: successful batches
-   are visible through history while the import runs. File-wide atomic visibility
-   would require a different publish/staging design.
-7. Graceful worker shutdown finishes the active batch and releases ownership;
-   SIGKILL recovery relies on the lease. Keep source/staging data until terminal
-   retention expires; clean them on success, failure and abandoned uploads.
+1. API bounds the in-memory multipart file, hashes exact bytes (SHA-256), and
+   stores a `bytea` source with the job in one transaction. No shared filesystem,
+   external queue, Redis or orphaned file reservation is required.
+2. Worker validates the **entire file** and stages bounded JSON batches in one
+   transaction, pinning exercise IDs. No workouts are written during validation.
+   If the final row is invalid, staged rows roll back and the job fails with zero
+   workouts. A successful validation clears the original source and sets totals.
+3. Worker applies one batch (≤100 entries **and** ≤1,000 sets) per transaction.
+   Catalog row locks and ID checks detect remapping after staging. Inserts,
+   removal of the staged batch and progress update commit together. Completion
+   means all expected batches committed, with exact entries/sets counters.
+4. A crash rolls back the current batch. A replacement worker acquires the
+   released session lock and resumes from the remaining staged batches. Attempts
+   are durably counted before each step, including interrupted attempts.
+5. SQL serialization/deadlock/lock-timeout/statement-timeout errors retry up to
+   three attempts per step with 100/200 ms delay. Successful steps reset attempts;
+   `retryCount` accumulates scheduled retries. Broken connections end the worker;
+   restart the process to resume. Permanent errors do not retry automatically.
 
-Await each batch before reading more work. Node's stream pipeline provides
-backpressure/error handling; it does not replace application-level batch limits.
-[Node 24 streams](https://nodejs.org/download/release/v24.21.0/docs/api/stream.html)
-Nest's Express adapter supports file interceptors with storage/limit options;
-check the installed Nest 11 API when implementing because the current docs also
-describe newer framework features. [Nest file upload](https://docs.nestjs.com/techniques/file-upload)
+A failed job returns a sanitized `error` with code, logical data `record` (header
+excluded), field and message when available. SQL failures have no raw database
+message or input values. Earlier committed batches remain visible if a later
+batch fails; the whole import is **not** one atomic workout transaction.
+`processedEntries`, `processedSets`, `completedBatches` describe this partial
+result. There is no automatic skip of an invalid record.
 
-## Acceptance cases before shipping
+A retry with the same user/key and exact bytes returns the existing job, including
+terminal status. Different bytes with the same key return 409. For a validation
+failure (zero writes), correct the file and use a new key. For a runtime failure
+after partial commits, reconcile committed data before uploading with a new key;
+blindly replaying the whole file under a new key can duplicate prior batches.
+CSV keys occupy a separate namespace from existing JSON logging keys.
 
-Run against isolated PostgreSQL, real HTTP multipart upload and a real child
-worker process. Keep expensive 50,000-entry cases outside routine integration.
+## Resource and retention trade-offs
 
-| Case | Required assertions |
-| --- | --- |
-| Worker initially stopped | Upload returns 202; durable queued job; zero workout rows. |
-| Start exactly one worker | 50,000 entries/150,000 sets committed, correct owners/exercises/dates/order/originals/exact kg; every row checked with independent arithmetic. |
-| Two queued files | One active job at a time; each completes without mixing users or checkpoints. |
-| Invalid first/middle/final record | Failed validation with bounded safe errors; zero workouts for that job; staging cleaned according to retention. |
-| CSV syntax/encoding | BOM, LF/CRLF, quotes/commas/newlines work; wrong headers, unclosed quote, NUL, invalid UTF-8 and repeated noncontiguous entryRef fail. |
-| Boundaries | Empty/header-only file, exact/max+1 bytes/rows/entries/sets/record length; chunk size respects both entry and set caps. |
-| Duplicate upload | Same user/key/file yields one job; changed file gives conflict; distinct keys allow intentional repeats. |
-| Crash before batch commit | Partial batch rolled back; restart resumes; no lost or extra sets. |
-| Crash after commit, before checkpoint | Same batch replays; exact original IDs and values remain; counters not incremented twice. |
-| Database outage/timeout | Durable retryable state and known committed progress; no false completed status or swallowed error. |
-| API/worker restart and lease expiry | Job/file survive; stale ownership cannot regress status; no duplicate writes. |
-| Reads during import | History/PR remain responsive with documented partial visibility; measure p95 while importing; sample worker/API RSS separately. |
-| Upload abort / process crash | Partial file never queued; orphan cleanup bounded and does not delete active/retryable jobs. |
-| Cleanup races job attachment | Pause job creation after upload; run sweeper concurrently. Exactly one state transition wins: either valid attached file + 202, or cleanup + rejected attachment; never 202 pointing to a deleted file. |
-| Catalog changes during import | Rename/reassign an exercise name between or during batches. A batch uses its validated ID or fails explicitly; never silently switches to a different exercise ID. |
+Multipart files are bounded but buffered in API memory; simultaneous uploads
+multiply that memory cost. The worker parses chunks without materializing all
+CSV rows, but retains the source buffer during validation. PostgreSQL stores
+queued source bytes and staged batches and therefore bears queue storage/WAL
+cost. Source/staging are removed on completion or terminal failure; job metadata
+and idempotency hashes remain. There is no automatic metadata expiry, upload
+rate limit, production capacity claim, or worker auto-restart policy.
 
-Report upload acceptance latency, total import time, entries/s, read p95, worker
-peak RSS, DB waits and retries. Establish budgets before running; existing bulk
-benchmark results are not measurements of this unimplemented CSV workflow.
+## Verification
+
+`pnpm test:unit --runInBand` covers strict parser formatting, values and exact
+50,000-entry/150,000-set boundaries. PostgreSQL integration tests upload actual
+multipart files, verify bytes and stored values, exercise idempotency, full-file
+validation, both batch limits, catalog changes, retry exhaustion and rollback.
+A process test SIGKILLs a worker while the next batch is blocked in SQL, checks
+that only the prior committed batch is visible, then starts a new worker and
+checks completion without duplicates.
+
+```bash
+pnpm test:performance:csv --retain-database \
+  --output=artifacts/performance/csv-import-retained.json
+```
+
+The benchmark generates a real CSV file, uploads it to a separate API process,
+starts a separate import worker, injects one transient record failure and verifies
+all 50,000 entries/150,000 sets with independent SQL. See its report for measured
+latency, process IDs and retained database name; credentials are never recorded.

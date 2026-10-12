@@ -57,5 +57,20 @@ services:
       timeout: 5s
       retries: 10
     stop_grace_period: 15s
+  import-worker:
+    build: .
+    init: true
+    command: ['node', 'dist/import-worker.js']
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-everfit}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-everfit}
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_POOL_MAX: 2
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-5000}
+      DB_LOCK_TIMEOUT_MS: ${DB_LOCK_TIMEOUT_MS:-3000}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 15s
 volumes:
   postgres-data:

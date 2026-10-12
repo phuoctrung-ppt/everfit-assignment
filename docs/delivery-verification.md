@@ -72,7 +72,6 @@ This cleanup deletes that project's test database volume. Do not substitute the 
 
 ## Submission handoff
 
-- [English video outline](video-walkthrough-outline.md): 19-minute script with API demo, AI corrections, code explanation, and 10,000-coach discussion. Actual recording **pending**.
 - Local Git history contains incremental implementation commits. `git remote -v` returned no configured remote during the documentation check; an accessible repository URL and publication remain **unconfirmed**. A local commit is not a published submission.
 - No claim of 10,000-coach capacity: authentication, authorization, load characterization, sustained concurrency tests, operational policy, and infrastructure decisions remain production work.
 

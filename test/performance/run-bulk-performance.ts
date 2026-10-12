@@ -106,11 +106,10 @@ async function main() {
       ),
     );
     report.seedCounts = await database.verify(load.expected);
+    report.seedPersistence = await database.verifyPersistence(load.persistence);
     report.seedStorage = await database.details();
     await database.analyze();
-    console.log(
-      `Verified ${entries} entries / ${entries * 3} sets for primary user.`,
-    );
+    console.log(`Verified ${entries} primary entries and stored values.`);
     stage = 'first-max-batch';
     // First max-batch request after loading; caches are already warm, not a cold DB claim.
     report.firstMaxBatchMs = (
@@ -156,6 +155,9 @@ async function main() {
     stage = 'retry-after-rollback';
     await load.post('reservation-rollback-c4-0', bulkBody(), 201, true);
     report.finalCounts = await database.verify(load.expected);
+    report.finalPersistence = await database.verifyPersistence(
+      load.persistence,
+    );
     report.finalStorage = await database.details();
     report.status = failures.length ? 'failed' : 'passed';
   } catch (error) {

@@ -41,6 +41,24 @@ The mixed soak alternates maximum fresh writes, committed replay, conflicts, and
 
 Every successful response is checked for shape, user, exercise, timestamps, set order/reps, exact original weight, and converted display weight. Replay responses must match; concurrent fresh-key responses have identical validated-content digests. Database entry/set/key counts are verified after each scenario and soak window for both users. No committed incomplete idempotency record is permitted. Failures return a nonzero exit code and retain available measurements in the JSON report.
 
+At seed and final idle checkpoints, a separate database pool now reads every
+entry/set in pages of 250 entries. Per-entry SHA-256 digests compare IDs, owner,
+exercise ID/name, workout/creation timestamps, ordered set IDs/positions/reps,
+six-decimal originals, units, and exact fourteen-decimal kg against HTTP input
+and acknowledged IDs/timestamps. Expected conversion uses bigint arithmetic,
+independent of production conversion helpers. This detects wrong values despite
+correct counts. Integration mutations cover twelve corruption types plus
+unexpected/missing entries and traversal across the page boundary.
+
+The parent retains one digest per committed entry (O(entries) memory); database
+result pages are bounded. This memory belongs to the load generator, not the
+measured API. Digest generation happens after response timing and adds parent
+pacing overhead; full database verification is outside measured windows. It
+assumes the isolated database is idle and catalog names stay unchanged. The
+benchmark fixtures use canonical catalog names; the independent persistence
+integration suite separately tests case/whitespace name normalization and every
+idempotency column across application restart.
+
 ## Measurements and interpretation
 
 The compiled Nest application runs in a child process with production mode, the selected log level, a ten-connection pool, normal 5s statement/3s lock timeouts, and a 512 MiB V8 old-space limit. A separate TypeScript parent generates HTTP requests and validates results. CPU/memory measurements belong to the API process; they exclude the parent, PostgreSQL, and the rest of the host. Metrics and GC controls use private IPC, never a public API endpoint.
@@ -94,4 +112,4 @@ Raw evidence: local [extended JSON report](../plans/20261009-1409-bulk-performan
 
 Measurement semantics follow [Node process CPU/memory documentation](https://nodejs.org/docs/latest-v24.x/api/process.html) and [Node performance hooks](https://nodejs.org/docs/latest-v24.x/api/perf_hooks.html). These APIs report process resources; they do not identify an individual allocation leak or measure database CPU.
 
-Measured execution evidence is recorded with the local [bulk performance plan](../plans/20261009-1409-bulk-performance/plan.md). History and personal-record query benchmarks remain future Phase 06 work; these results cannot establish performance for 10,000 concurrent coaches.
+Measured execution evidence is recorded with the local [bulk performance plan](../plans/20261009-1409-bulk-performance/plan.md). History and personal-record benchmarks are documented in [read performance](read-performance.md). The [2026-10-12 assignment review](assignment-review.md) records a fresh run with full persistence checks; these results cannot establish performance for 10,000 concurrent coaches or an unimplemented CSV worker.

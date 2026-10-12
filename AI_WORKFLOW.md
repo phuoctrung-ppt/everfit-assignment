@@ -353,3 +353,34 @@ Runtime results: clean Compose applied three migrations and seeded four exercise
 Independent final review found no Critical/Important issues. Corrected three minor findings: compare smoke error request IDs with the current response header, repair README table formatting, and document saved-state restart commands. Reviewer reproduced acceptance of a stale request ID; a focused adversarial check then confirmed rejection after the fix, followed by a successful full HTTP smoke. No application query behavior changed; prior performance measurements were not rerun.
 
 Unresolved handoff: actual English recording and an accessible repository delivery URL.
+
+## 13. Assignment and persistence review — 2026-10-12
+
+The user requested a new review against `Backend Engineer.pdf`, tests proving
+actual database contents, and consideration of a 50,000-record CSV import with
+one worker. Codex reread the PDF and project rules, ran the existing suite, and
+delegated the assignment review and heterogeneous persistence tests separately.
+An independent follow-up reviewer checked the benchmark oracle and error fix.
+
+The review corrected a verification gap: HTTP response equality and database row
+counts alone do not establish that every original/normalized weight, owner,
+exercise and set position was persisted correctly. New checks use a separate
+PostgreSQL client plus independent integer arithmetic, cover application restart
+and replay, and intentionally corrupt stored values to prove detection. The
+bulk harness now compares every persisted entry/set after seed and final load.
+
+One application correction preserves four explicitly allowlisted validation
+reasons instead of replacing all of them with `Invalid value`. Tests also reject
+arbitrary future validator messages and verify that malicious names/fields are
+not echoed. General validation sanitization remains in place.
+
+Fresh evidence: 244 unit and 267 PostgreSQL integration tests passed; lint,
+TypeScript and builds passed. Bulk verification checked 91,100 entries/547,000
+sets at completion; all nine 50,000-entry read scenarios passed. Commands,
+timings and limitations are in [the review](docs/assignment-review.md).
+
+The PDF requires large-dataset performance, not a single 50,000-entry request.
+CSV upload and one worker remain a [documented proposal](docs/csv-import-design.md),
+with crash/checkpoint/idempotency cases; no CSV throughput or implementation is
+claimed. Existing working-tree edits were preserved; no commit or publication
+was performed in this review session.

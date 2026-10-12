@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { BulkWorkoutResponseSchema } from '../../src/schemas/workout-logging.schema';
 import type { BulkWorkoutDto } from '../../src/schemas/workout.schema';
+import { expectedPersistenceDigest } from './persistence-oracle';
 
 export const PRIMARY_USER = 'performance-primary';
 export const SECONDARY_USER = 'performance-secondary';
@@ -34,6 +35,7 @@ export interface Counts {
 }
 export class Workload {
   readonly expected = new Map<string, Counts>();
+  readonly persistence = new Map<string, string>();
   private readonly committed = new Map<string, string>();
   constructor(
     private readonly url: string,
@@ -103,6 +105,16 @@ export class Workload {
           return { elapsedMs, json };
         }
         this.committed.set(identity, digest);
+        parsed.data.forEach((entry, index) => {
+          assert.ok(
+            !this.persistence.has(entry.id),
+            'Duplicate fresh entry ID',
+          );
+          this.persistence.set(
+            entry.id,
+            expectedPersistenceDigest(user, body.entries[index]!, entry),
+          );
+        });
         const counts = this.expected.get(user) ?? {
           entries: 0,
           sets: 0,

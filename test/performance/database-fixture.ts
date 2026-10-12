@@ -7,6 +7,7 @@ import { ExerciseCatalogSchema } from '../../src/schemas/exercise-catalog.schema
 import { seedExerciseCatalog } from '../../scripts/seed-exercise-catalog';
 import { createTestDatabase } from '../support/test-database';
 import type { Counts } from './workload';
+import { verifyPersistedWorkouts } from './persistence-oracle';
 
 export async function createPerformanceDatabase() {
   const database = await createTestDatabase();
@@ -35,6 +36,8 @@ export async function createPerformanceDatabase() {
     return {
       databaseUrl: database.databaseUrl,
       close,
+      verifyPersistence: (expected: ReadonlyMap<string, string>) =>
+        verifyPersistedWorkouts(service.pool, expected),
       async verify(expected: Map<string, Counts>) {
         const actual: Record<string, Counts> = {};
         for (const [user, counts] of expected) {

@@ -9,6 +9,13 @@ import { PinoLogger } from 'nestjs-pino';
 import { ZodValidationException } from 'nestjs-zod';
 import type { ZodError } from 'zod';
 
+const safeCustomReasons = new Set([
+  'Unknown exercise',
+  'End must be after start',
+  'Weight must have at most six decimal places',
+  'A request must contain at most 1000 sets',
+]);
+
 const responses: Record<number, { code: string; message: string }> = {
   400: { code: 'VALIDATION_ERROR', message: 'Invalid request' },
   404: { code: 'NOT_FOUND', message: 'Resource not found' },
@@ -37,11 +44,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
       exception instanceof ZodValidationException
         ? (exception.getZodError() as ZodError).issues.map((issue) => ({
             path: issue.path.map(String).join('.'),
-            // Zod messages can echo attacker-controlled unknown keys and values.
             message:
               issue.code === 'unrecognized_keys'
                 ? 'Unknown field'
-                : 'Invalid value',
+                : issue.code === 'custom' &&
+                    safeCustomReasons.has(issue.message)
+                  ? issue.message
+                  : 'Invalid value',
           }))
         : [];
     this.logger[status >= 500 ? 'error' : 'warn'](

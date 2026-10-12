@@ -9,6 +9,7 @@ import {
 import { HealthResponseSchema } from '../src/schemas/http-response.schema';
 import { SmokeHttp, smokeOptions } from './smoke-http';
 import { smokeRecords } from './smoke-records';
+import { smokeCsv } from './smoke-csv';
 import { saveSmokeState, verifySmokeState } from './smoke-state';
 
 async function run(http: SmokeHttp, options: ReturnType<typeof smokeOptions>) {
@@ -132,8 +133,9 @@ async function run(http: SmokeHttp, options: ReturnType<typeof smokeOptions>) {
       history: finalHistory,
     });
   }
+  await smokeCsv(http);
   console.log(
-    `PASS catalog, writes, replay/conflict, rollback, history, records, validation (${http.requests} requests; 4 isolated entries retained)`,
+    `PASS catalog, writes, replay/conflict, rollback, history, records, validation, CSV imports (${http.requests} requests; 4 JSON and 2 CSV entries retained under separate users)`,
   );
 }
 

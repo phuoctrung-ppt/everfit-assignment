@@ -11,47 +11,263 @@ flowchart LR
     Services --> Units[Decimal conversion / response mapping]
     Services --> SQL[Parameterized repositories]
     SQL --> PG[(PostgreSQL)]
+    HTTP --> Imports[CSV upload and status]
+    Imports --> PG
+    Worker[Separate import worker] --> PG
     Init[One-shot migrations + catalog seed] --> PG
 ```
 
 Controllers validate HTTP contracts; services own transactions and calculations; repositories own SQL. PostgreSQL provides atomic bulk writes, user/key uniqueness, relational constraints, and on-demand record selection. Direct `pg` queries keep those guarantees visible. CSV imports use a durable PostgreSQL job queue and one separate worker. There is no ORM, external queue service, cache, or authentication; the supplied user ID selects data and does not establish identity.
 
-## Local startup
+## Start PostgreSQL, API and import worker
 
-Requires Docker with Compose. Copy the example and replace its password in all three locations (`POSTGRES_PASSWORD` and both URLs):
+Use either **all Docker** or **host API/worker with Docker PostgreSQL**. Run from
+the repository root. Keep an existing `.env`; on first setup:
 
-```sh
-cp .env.example .env
-# Edit .env. Use a URL-safe password for Compose (letters/digits/hyphen/underscore).
-docker compose up --build -d
-curl http://localhost:3000/health
+```bash
+test -f .env || cp .env.example .env
+# Edit .env: replace POSTGRES_PASSWORD and the passwords in both database URLs.
+# Use a URL-safe password (letters, digits, hyphen, underscore).
 ```
 
-Compose waits for PostgreSQL, then its one-shot `migrate` service applies migrations and seeds the catalog before starting the API as the non-root `node` user. Both initialization and the API use the same image with production dependencies; the seed is compiled during the image build. PostgreSQL data lives in the named `postgres-data` volume. Both published ports bind to localhost; the database port is published for host development and integration tests. Remove that mapping when host database access is unnecessary. `docker compose down` retains data. Do not remove volumes unless their data is disposable.
+### Option A: all services in Docker
 
-For host development, install Node **24.21.0** and pnpm **12.9.1**, then:
+Requires Docker with Compose. This starts PostgreSQL, applies pending migrations
+and seeds the catalog, then starts the API **and** the separate import worker:
 
-```sh
-pnpm install --frozen-lockfile
+```bash
+docker compose up --build -d
+docker compose ps -a
+docker compose logs --tail=50 migrate import-worker
+curl --fail --silent --show-error http://localhost:3000/health
+```
+
+Wait for API health to report `{"status":"ok"}`. `migrate` should show
+`Exited (0)`; `postgres` and `api` should be healthy, and `import-worker` running.
+Only one import worker may own a database at a time. Do not start a host worker
+against the same database while the Compose worker runs. Stop a host API using
+port 3000 before starting the Docker API, or select a free host port with
+`PORT=3308 docker compose up --build -d` and use that port in `BASE_URL` below.
+Keep the same port setting for later Compose commands.
+
+```bash
+# Follow import worker errors; progress is available through the status endpoint.
+docker compose logs -f import-worker
+# Restart the worker after a process/connection failure; persisted jobs resume.
+docker compose restart import-worker
+# Stop the stack and retain database contents.
+docker compose down
+```
+
+Containers use the non-root `node` user for API/worker/migrations. PostgreSQL data
+lives in the named `postgres-data` volume. Published ports bind to localhost.
+`docker compose down` retains the volume; do not use `down --volumes` for data
+you want to keep. Reapply migrations/seed to an existing stack when updating code:
+
+```bash
+docker compose run --build --rm migrate
+docker compose up --build -d api import-worker
+```
+
+### Option B: host API and worker, Docker PostgreSQL
+
+Requires Node **24.21.0** and pnpm **12.9.1**. Stop the Compose API/worker if they
+are already running, then initialize PostgreSQL and compile the worker:
+
+```bash
+docker compose stop api import-worker
 docker compose up postgres -d
+pnpm install --frozen-lockfile
 pnpm db:migrate
 pnpm db:seed
-pnpm start:dev
+pnpm build
 ```
 
-Verify every public feature after startup (requires the host Node/pnpm install above):
+Run these in **two terminals** from the repository root:
 
-```sh
+```bash
+# Terminal 1: HTTP API with source watch
+pnpm start:dev
+# Alternatively, after building: pnpm start
+```
+
+```bash
+# Terminal 2: separate CSV worker
+pnpm start:import-worker
+```
+
+Rebuild and restart the compiled worker after changing worker code. Scripts load
+`.env`; existing environment variables take precedence. Both host processes must
+use the same `DATABASE_URL`. If changing `POSTGRES_PORT`, update both host database
+URLs; Compose services continue using `postgres:5432` internally.
+
+### Startup checks and the previous CSV 500
+
+CSV upload requires migration `004-csv-imports.cjs`. If an older database lacks
+`workout_imports`/`workout_import_batches`, upload/status queries return 500 even
+when `/health` is 200: health checks database connectivity, not migration state.
+Apply `pnpm db:migrate` for host operation, or the Compose migration command above.
+Do not manually create tables or remove the existing database volume.
+
+A 202 upload response means a durable job was accepted. A job staying `queued`
+requires checking the worker process, its logs and its database URL. A second
+worker for the same database exits because of the singleton lock. Wait for
+`completed` before checking the final entry count. A terminal `failed` job exposes
+sanitized error details and any progress committed before failure.
+
+### Automated full-controller verification
+
+With API and worker running, install host dependencies and run:
+
+```bash
 pnpm smoke --base-url http://localhost:3000
 ```
 
-Smoke writes four entries under a new random `smoke-…` user; run against a disposable/local environment. It checks catalog, single/bulk logging, replay/conflict, rollback/key reuse, filtered history, pagination, unit conversion, records/comparison, malformed input, and empty ranges. See [delivery verification](docs/delivery-verification.md) for restart and isolated clean-start commands.
+Smoke checks every application controller: health, catalog, JSON single/bulk,
+history, CSV upload/status, and personal records/compare. It also checks replay,
+conflict, validation, CSV failure, pagination, unit conversion and empty ranges.
+It retains four JSON entries and two CSV entries under separate generated users,
+plus import metadata. Use a local/disposable environment. Smoke exits nonzero on
+failure, including when an import worker cannot complete jobs within its timeout.
+See [delivery verification](docs/delivery-verification.md) for actual run evidence.
 
-For the compiled host application, use `pnpm build && pnpm start`. Scripts load `.env` using Node; existing environment variables take precedence. If changing `POSTGRES_PORT`, update both host URLs. Compose uses its internal PostgreSQL hostname and fixed port.
+## Full curl workflow: write, import, read, compare
+
+The sequence below calls all **nine routes across six controllers**. It requires
+Bash, `curl` and `jq`, a seeded catalog, and a running API/worker. Run in one Bash
+session from the repository root. It writes three JSON entries and imports the
+tracked CSV into a separate user: **50,000 entries / 150,000 sets**, then checks
+completion and reads records from the imported data. Each run generates fresh
+users; repeating a request with its existing key is safe, changing to a new key
+can create additional workouts.
+
+<!-- controller-flow:start -->
+
+```bash
+set -euo pipefail
+BASE_URL="${BASE_URL:-http://localhost:3000}"
+DEMO_USER="demo-$(date +%s)-$RANDOM"
+CSV_USER="csv-$DEMO_USER"
+FLOW_DIR="${FLOW_DIR:-$(mktemp -d)}"
+mkdir -p "$FLOW_DIR"
+
+# 1. Health and seeded exercise catalog (200).
+curl -fsS --max-time 30 "$BASE_URL/health" | jq -e '.status == "ok"'
+curl -fsS --max-time 30 --get "$BASE_URL/exercises" \
+  --data-urlencode 'muscleGroup=chest' --data-urlencode 'limit=20' \
+  | jq -e '.data | any(.name == "Bench Press")'
+
+# 2. Single JSON entry in January (201).
+curl -fsS --max-time 30 "$BASE_URL/users/$DEMO_USER/workout-entries" \
+  -H 'Content-Type: application/json' -H "Idempotency-Key: $DEMO_USER-single" \
+  -d '{"date":"2026-01-10T08:00:00Z","exerciseName":"Bench Press","sets":[{"reps":8,"weight":60,"unit":"kg"}]}' \
+  | tee "$FLOW_DIR/single.json" | jq -e '.data.sets[0].weight == "60.0000"'
+
+# 3. JSON bulk: February Bench Press plus Squat (201).
+curl -fsS --max-time 30 "$BASE_URL/users/$DEMO_USER/workout-entries/bulk" \
+  -H 'Content-Type: application/json' -H "Idempotency-Key: $DEMO_USER-bulk" \
+  -d '{"entries":[{"date":"2026-02-10T08:00:00Z","exerciseName":"Bench Press","sets":[{"reps":8,"weight":70,"unit":"kg"}]},{"date":"2026-02-10T09:00:00Z","exerciseName":"Squat","sets":[{"reps":5,"weight":80,"unit":"kg"}]}]}' \
+  | jq -e '.data | length == 2'
+
+# 4. Filtered history in pounds (200); latest Bench Press is 70 kg.
+curl -fsS --max-time 30 --get "$BASE_URL/users/$DEMO_USER/workout-entries" \
+  --data-urlencode 'exerciseName=bench' --data-urlencode 'muscleGroup=chest' \
+  --data-urlencode 'from=2026-01-01T00:00:00Z' --data-urlencode 'to=2026-03-01T00:00:00Z' \
+  --data-urlencode 'unit=lb' --data-urlencode 'limit=1' \
+  | tee "$FLOW_DIR/history.json" | jq -e '.data[0].sets[0].weight == "154.3236" and .pagination.hasMore'
+CURSOR=$(jq -er '.pagination.nextCursor' "$FLOW_DIR/history.json")
+curl -fsS --max-time 30 --get "$BASE_URL/users/$DEMO_USER/workout-entries" \
+  --data-urlencode 'exerciseName=bench' --data-urlencode 'muscleGroup=chest' \
+  --data-urlencode 'from=2026-01-01T00:00:00Z' --data-urlencode 'to=2026-03-01T00:00:00Z' \
+  --data-urlencode 'unit=lb' --data-urlencode 'limit=1' --data-urlencode "cursor=$CURSOR" \
+  | jq -e '.data[0].sets[0].weight == "132.2774" and (.pagination.hasMore | not)'
+
+# 5. Personal records, then January versus February (200).
+curl -fsS --max-time 30 --get "$BASE_URL/users/$DEMO_USER/personal-records" \
+  --data-urlencode 'exerciseName=Bench Press' --data-urlencode 'unit=kg' \
+  | jq -e '.data.heaviestSet.value == "70.0000"'
+curl -fsS --max-time 30 --get "$BASE_URL/users/$DEMO_USER/personal-records/compare" \
+  --data-urlencode 'exerciseName=Bench Press' --data-urlencode 'unit=kg' \
+  --data-urlencode 'baselineFrom=2026-01-01T00:00:00Z' --data-urlencode 'baselineTo=2026-02-01T00:00:00Z' \
+  --data-urlencode 'comparisonFrom=2026-02-01T00:00:00Z' --data-urlencode 'comparisonTo=2026-03-01T00:00:00Z' \
+  | tee "$FLOW_DIR/compare.json" \
+  | jq -e '.data.differences | .heaviestSet.value == "10.0000" and .highestVolumeSet.value == "80.0000" and .estimatedOneRepMax.value == "12.6667"'
+
+# 6. Real multipart CSV upload (202). Let curl set the multipart boundary.
+curl -fsS --max-time 30 "$BASE_URL/users/$CSV_USER/workout-entries/bulk/csv" \
+  -H "Idempotency-Key: $CSV_USER-file" \
+  -F 'file=@data/workouts-50000.csv;type=text/csv' > "$FLOW_DIR/import.json"
+IMPORT_ID=$(jq -er '.data.id' "$FLOW_DIR/import.json")
+
+# 7. Poll import status (200). Fail on failed/timeout; 202 alone is not success.
+FLOW_DEADLINE=$((SECONDS + 180))
+while true; do
+  curl -fsS --max-time 10 "$BASE_URL/users/$CSV_USER/workout-entries/imports/$IMPORT_ID" > "$FLOW_DIR/status.json"
+  IMPORT_STATUS=$(jq -er '.data.status' "$FLOW_DIR/status.json")
+  if [ "$IMPORT_STATUS" = completed ]; then break; fi
+  if [ "$IMPORT_STATUS" = failed ]; then cat "$FLOW_DIR/status.json"; exit 1; fi
+  if [ "$SECONDS" -ge "$FLOW_DEADLINE" ]; then echo 'Import timed out; check worker logs'; exit 1; fi
+  sleep 1
+done
+jq -e '.data | .processedEntries == 50000 and .processedSets == 150000 and .completedBatches == 500' "$FLOW_DIR/status.json"
+
+# 8. Read back imported workouts and records (200).
+curl -fsS --max-time 30 --get "$BASE_URL/users/$CSV_USER/workout-entries" \
+  --data-urlencode 'exerciseName=bench' --data-urlencode 'unit=kg' --data-urlencode 'limit=2' \
+  | jq -e '.data | length == 2 and all(.sets | length == 3)'
+curl -fsS --max-time 30 --get "$BASE_URL/users/$CSV_USER/personal-records" \
+  --data-urlencode 'exerciseName=Bench Press' --data-urlencode 'unit=kg' \
+  | jq -e '.data | .heaviestSet.value == "61.2350" and .highestVolumeSet.value == "360.0000" and .estimatedOneRepMax.value == "72.0000"'
+curl -fsS --max-time 30 --get "$BASE_URL/users/$CSV_USER/personal-records/compare" \
+  --data-urlencode 'exerciseName=Bench Press' \
+  --data-urlencode 'baselineFrom=2026-01-01T00:00:00Z' --data-urlencode 'baselineTo=2026-02-01T00:00:00Z' \
+  --data-urlencode 'comparisonFrom=2026-02-01T00:00:00Z' --data-urlencode 'comparisonTo=2026-03-01T00:00:00Z' \
+  | jq -e '.data.differences | all(. != null and .value == "0.0000")'
+printf 'PASS all controller routes; JSON user=%s CSV user=%s import=%s results=%s\n' "$DEMO_USER" "$CSV_USER" "$IMPORT_ID" "$FLOW_DIR"
+```
+
+<!-- controller-flow:end -->
+
+Both imported periods contain the same three sets per entry, so CSV comparison
+differences are zero. The separate JSON example demonstrates positive changes.
+The import counter checks above are paired with public readback; for independent
+SQL checks of **every** stored value, use the [CSV benchmark](docs/csv-import-benchmark.md).
+
+For an independent database count on the Compose stack, keep `CSV_USER` from
+that same Bash session and run (use the same Compose port/project options):
+
+```bash
+docker compose exec -T postgres sh -c \
+  'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v target_user="$1"' sh "$CSV_USER" <<'SQL'
+SELECT
+  (SELECT count(*) FROM workout_entries WHERE user_id = :'target_user') AS entries,
+  (SELECT count(*) FROM workout_sets s JOIN workout_entries e ON e.id = s.entry_id
+    WHERE e.user_id = :'target_user') AS sets;
+SELECT status, processed_entries, processed_sets, completed_batches, retry_count
+FROM workout_imports WHERE user_id = :'target_user';
+SQL
+```
+
+Expected: `50000` entries, `150000` sets, `completed`, `500` batches. This count
+check complements the HTTP assertions; the benchmark SQL oracle additionally
+checks every stored field.
+
+| Controller       | Routes exercised by the flow and smoke                   |
+| ---------------- | -------------------------------------------------------- |
+| Health           | `GET /health`                                            |
+| Exercises        | `GET /exercises`                                         |
+| Workout logging  | `POST /users/:userId/workout-entries`, `POST .../bulk`   |
+| CSV import       | `POST .../bulk/csv`, `GET .../imports/:importId`         |
+| Workout history  | `GET /users/:userId/workout-entries`                     |
+| Personal records | `GET /users/:userId/personal-records`, `GET .../compare` |
+
+The automated smoke adds negative cases and replay checks. PostgreSQL integration
+tests cover rollback, worker crash/retry, catalog changes, missing/extra data and
+exact database values; run the full suites with the commands in **Verification**.
 
 ## Catalog and development Swagger
 
-Compose seeds automatically. For host development, run `pnpm db:seed` after migrations to load `data/exercise-catalog.json` into the database selected by `DATABASE_URL`. The host seed command requires development dependencies (`ts-node`); Docker runs the compiled copy. To repeat initialization without recreating API containers, use `docker compose run --rm migrate`. It reapplies catalog configuration and performs no workout deletion. Seeding is transactional and repeatable. UUIDs are canonicalized before duplicate validation, so case-variant IDs cannot overwrite one another. NUL characters are rejected in exercise and muscle-group names. Stable exercise IDs preserve history; listed exercises receive the configured names and muscle-group mappings. Unlisted exercises and existing groups remain intact.
+Compose seeds automatically. For host development, run `pnpm db:seed` after migrations to load `data/exercise-catalog.json` into the database selected by `DATABASE_URL`. The host seed command requires development dependencies (`ts-node`); Docker runs the compiled copy. To repeat initialization without recreating API containers, use `docker compose run --build --rm migrate`. It reapplies catalog configuration and performs no workout deletion. Seeding is transactional and repeatable. UUIDs are canonicalized before duplicate validation, so case-variant IDs cannot overwrite one another. NUL characters are rejected in exercise and muscle-group names. Stable exercise IDs preserve history; listed exercises receive the configured names and muscle-group mappings. Unlisted exercises and existing groups remain intact.
 
 ```sh
 curl 'http://localhost:3000/exercises?muscleGroup=chest&limit=1'
@@ -65,7 +281,7 @@ This changes the previous full-catalog contract: clients must follow `pagination
 
 Fixtures include Bench Press, Squat, Deadlift, and Push Up; zero weight is supported for every exercise. Exact lookup uses JavaScript trim/lowercase consistently for stored names and requests; internal whitespace and aliases remain distinct. Migration `002-catalog-name-normalization.cjs` backfills existing names and retains the unique index while removing PostgreSQL’s conflicting Unicode lowercase check. The normalized column is text to allow lowercase character expansion; display names remain limited to 200 characters.
 
-With `NODE_ENV=development` (the host default), Swagger UI is at [localhost:3000/docs](http://localhost:3000/docs), and OpenAPI JSON is at `/docs-json`. Both routes and Swagger assets are disabled in `test` and `production`. Compose honors `NODE_ENV` from the environment or `.env`, defaulting to production when unset. The provided `.env.example` selects development for local Swagger; use `NODE_ENV=production docker compose up --build -d` to disable it. The clean delivery verification runs production mode. Documentation exposes health, catalog, single/bulk logging, history, and personal-record endpoints, with request, header, and response/error schemas. `ZodResponse` and the shared serializer enforce declared response contracts at runtime. Add each later endpoint’s DTOs and response decorators alongside its implementation.
+With `NODE_ENV=development` (the host default), Swagger UI is at [localhost:3000/docs](http://localhost:3000/docs), and OpenAPI JSON is at `/docs-json`. Both routes and Swagger assets are disabled in `test` and `production`. Compose honors `NODE_ENV` from the environment or `.env`, defaulting to production when unset. The provided `.env.example` selects development for local Swagger; use `NODE_ENV=production docker compose up --build -d` to disable it. The clean delivery verification runs production mode. Documentation exposes health, catalog, single/bulk logging, CSV upload/status, history, and personal-record endpoints, with request, header, and response/error schemas. `ZodResponse` and the shared serializer enforce declared response contracts at runtime. Add each later endpoint’s DTOs and response decorators alongside its implementation.
 
 Pagination contracts live in `src/schemas/pagination.schema.ts`; the reusable Zod DTO is `src/common/cursor-pagination-query.dto.ts`. A route with feature filters extends `CursorPaginationQuerySchema` and creates its own Zod DTO: `ExerciseListQuerySchema` adds `muscleGroup`, so Swagger includes it alongside `limit` and optional `cursor`. Routes needing only pagination can use `CursorPaginationQueryDto` directly. A paginated route declares its query DTO and a concrete response DTO built from `CursorPageSchema(ItemSchema)`, then uses `@ZodResponse` for that DTO. The exercises service validates its own cursor resource/version/tuple and filter binding before querying. To opt out, use the route's ordinary query/response contracts and corresponding service read; there is no global pagination registration or Swagger parameter-hiding mechanism. `/health` declares no pagination DTO, has no cursor/limit parameters in Swagger, and returns its ordinary health response.
 
@@ -278,7 +494,7 @@ file of up to 50,000 entries (150,000 sets, 32 MiB), use multipart field `file`:
 ```bash
 pnpm db:migrate
 pnpm build
-# Run alongside the API in another terminal; Compose includes this service.
+# Host mode only: run in another terminal. Docker mode already has a worker.
 pnpm start:import-worker
 
 curl -X POST http://localhost:3000/users/athlete-1/workout-entries/bulk/csv \

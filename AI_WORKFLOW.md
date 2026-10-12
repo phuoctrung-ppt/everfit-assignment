@@ -440,3 +440,24 @@ artifacts retained; see [CSV benchmark](docs/csv-import-benchmark.md).
 
 Final verification: 386 unit and 285 PostgreSQL integration tests passed, including
 real worker crash recovery. Build, lint and TypeScript checks passed.
+
+## 16. README and full controller workflow — 2026-10-12
+
+User requested Docker/worker startup, curl/import/compare instructions and full
+controller verification. README now separates all-Docker and host-API/worker
+startup, requires migrations before CSV use, explains the previous missing-table
+500, and includes a complete executable curl sequence with bounded job polling.
+An independent SQL count example complements HTTP assertions.
+
+Delegated smoke expansion to cover CSV upload/status while preserving existing
+JSON and restart-state checks. CSV smoke verifies invalid final rows, replay,
+conflict, user scoping, exact imported values, paginated history and record deltas.
+Independent review found no issues; no application endpoint behavior changed.
+
+Built and started a fresh isolated Compose stack on API3308/PostgreSQL55438 with
+one worker. Smoke passed58 requests. Executed README curl commands verbatim,
+imported50k entries/150ksets and checked every stored value independently in SQL.
+API/worker restart preserved original IDs and replayed the completed import.
+386 unit and285 integration tests, lint/build/TypeScript passed. Retained stack
+and local evidence are described in docs/delivery-verification.md. No commit
+requested; unrelated working-tree edits preserved.

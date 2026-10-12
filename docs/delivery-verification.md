@@ -77,3 +77,67 @@ This cleanup deletes that project's test database volume. Do not substitute the 
 - No claim of 10,000-coach capacity: authentication, authorization, load characterization, sustained concurrency tests, operational policy, and infrastructure decisions remain production work.
 
 Unresolved handoff: actual English recording and accessible repository delivery location.
+
+## Full controller flow with CSV worker — 2026-10-12
+
+Fresh verification used Compose project `everfit-controller-flow`, a new database
+volume, API `http://localhost:3308`, PostgreSQL host port `55438`, development mode
+and the separate `import-worker` service. The existing host API/database were
+preserved. All Docker images built successfully; initializer applied **four**
+migrations and seeded the catalog. API/PostgreSQL became healthy; worker ran.
+The stack remains running locally with its data volume retained.
+
+Commands actually executed (private environment stays Git-ignored):
+
+```bash
+docker compose --env-file artifacts/performance/controller-flow/compose.env \
+  -p everfit-controller-flow up --build -d
+pnpm smoke --base-url http://localhost:3308 \
+  --state-file artifacts/performance/controller-flow/smoke-state.json
+```
+
+The marked Bash workflow in README was extracted and executed verbatim with
+`BASE_URL=http://localhost:3308`. Its `curl`/`jq` assertions passed through all
+nine application routes across six controllers. Swagger exposed the same nine
+operations. This run imported the tracked 50,000-entry CSV, read imported history,
+calculated personal records and compared January/February. It separately wrote
+three JSON entries so comparison demonstrated positive deltas rather than only
+zero differences in the repetitive CSV fixture.
+
+| Check                                           | Observed result                                                                                                                                                 |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Default HTTP smoke, including CSV upload/status | 58 requests passed; four JSON and two CSV entries under separate generated users                                                                                |
+| CSV validation/replay/isolation                 | Invalid final row failed with zero writes; valid file completed; replay unchanged; changed file 409; other-user status 404; malformed requests 400              |
+| README curl flow                                | All value assertions passed; health/catalog/single/bulk/history/upload/status/records/compare covered                                                           |
+| JSON January→February comparison                | Heaviest +10.0000 kg; volume +80.0000 kg*reps; Epley +12.6667 kg                                                                                                |
+| Imported records                                | 61.2350 kg heaviest; 360.0000 kg*reps volume; 72.0000 kg Epley; January→February differences zero                                                               |
+| Independent SQL verification                    | 50,000 entries, 150,000 sets; zero mismatched entry/set rows; 500 committed batches; staging/source cleared                                                     |
+| API + worker restart                            | JSON saved-state replay/history passed (3 requests); CSV re-upload returned identical completed job; every stored entry/set column and ID fingerprint unchanged |
+| Regression checks                               | 386 unit tests + 285 PostgreSQL integration tests passed; lint, Nest build, TypeScript passed                                                                   |
+| Independent review                              | No findings in README instructions, route coverage, smoke assertions or polling                                                                                 |
+
+SQL verification used `generate_series` expectations and `EXCEPT ALL` in both
+directions, checking user, exercise, UTC timestamp, set membership/position/reps,
+original unit/weight and exact normalized kg. This is stronger than the README's
+quick row counts. The historical failure/retry benchmark remains separate; this
+Docker run had **zero retries** and did not inject faults.
+
+Retained imported user: `csv-demo-1791779804-131`.
+Import ID: `ee3aeabd-c68d-4cef-ad30-9d8b8acad5cd`.
+Database: `everfit` **inside the isolated Compose project**, distinct from the
+existing development database on port 5432.
+
+Local raw outputs live under `artifacts/performance/controller-flow/`:
+`curl-output.txt`, `status.json`, `compare.json`, `replayed-import.json`,
+`database-before-restart.json` and `database-after-restart.json`. They are ignored;
+this tracked summary and README preserve reproduction guidance. The private
+`compose.env` contains credentials and must never be committed.
+
+To inspect or stop this retained local stack without deleting its data:
+
+```bash
+docker compose --env-file artifacts/performance/controller-flow/compose.env \
+  -p everfit-controller-flow ps -a
+docker compose --env-file artifacts/performance/controller-flow/compose.env \
+  -p everfit-controller-flow down
+```

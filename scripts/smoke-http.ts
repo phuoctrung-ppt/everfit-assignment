@@ -43,15 +43,24 @@ export class SmokeHttp {
     status = 200,
     body?: unknown,
     key?: string,
+    signal?: AbortSignal,
   ): Promise<T> {
+    const multipart = body instanceof FormData;
+    const timeout = AbortSignal.timeout(this.options.timeout);
     const response = await fetch(`${this.options.baseUrl}${path}`, {
       method: body === undefined ? 'GET' : 'POST',
       headers: {
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(body === undefined || multipart
+          ? {}
+          : { 'Content-Type': 'application/json' }),
         ...(key === undefined ? {} : { 'Idempotency-Key': key }),
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(this.options.timeout),
+      body: multipart
+        ? body
+        : body === undefined
+          ? undefined
+          : JSON.stringify(body),
+      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
       redirect: 'error',
     });
     const requestId = z.uuid().parse(response.headers.get('x-request-id'));
@@ -64,7 +73,13 @@ export class SmokeHttp {
     return result;
   }
 
-  async error(path: string, status: number, body?: unknown, key?: string) {
+  async error(
+    path: string,
+    status: 400 | 404 | 409,
+    body?: unknown,
+    key?: string,
+    details: 'nonempty' | 'empty' = status === 400 ? 'nonempty' : 'empty',
+  ) {
     const result = await this.request(
       path,
       ErrorResponseSchema,
@@ -74,10 +89,14 @@ export class SmokeHttp {
     );
     assert.equal(
       result.error.code,
-      status === 409 ? 'IDEMPOTENCY_CONFLICT' : 'VALIDATION_ERROR',
+      status === 409
+        ? 'IDEMPOTENCY_CONFLICT'
+        : status === 404
+          ? 'NOT_FOUND'
+          : 'VALIDATION_ERROR',
     );
     assert.equal(result.requestId, this.responseRequestId);
-    if (status === 409) assert.deepEqual(result.error.details, []);
+    if (details === 'empty') assert.deepEqual(result.error.details, []);
     else assert(result.error.details.length > 0);
     return result;
   }

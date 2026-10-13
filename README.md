@@ -4,7 +4,7 @@ A REST API for coaches to record client workouts: browse exercises, log workouts
 
 **Stack:** NestJS 11, PostgreSQL 17 (direct `pg` queries, no ORM), Zod, Docker Compose, Node 24.
 
-Related docs: [AI workflow](AI_WORKFLOW.md) · [Delivery evidence](docs/delivery-verification.md) · [Detailed design](docs/workout-api-design.md) · 
+Related docs: [AI workflow](AI_WORKFLOW.md) · [Delivery evidence](docs/delivery-verification.md) · [Detailed design](docs/workout-api-design.md) · [Video walkthrough](artifacts/video/everfit-desktop/everfit-real-desktop-male.mp4)
 
 ## Architecture
 

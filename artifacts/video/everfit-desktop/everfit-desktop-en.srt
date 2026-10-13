@@ -1,0 +1,859 @@
+1
+00:00:00,100 --> 00:00:05,733
+Hello, I am presenting my Everfit Workout Logging API.
+
+2
+00:00:05,733 --> 00:00:13,250
+It helps coaches record client workouts, review history, and compare personal records.
+
+3
+00:00:14,642 --> 00:00:22,492
+I will explain the architecture, demonstrate every API, and show important error cases.
+
+4
+00:00:22,492 --> 00:00:27,946
+Then I will explain my AI workflow and walk through the record calculation
+
+5
+00:00:27,946 --> 00:00:29,625
+code line by line.
+
+6
+00:00:31,017 --> 00:00:37,067
+I will finish with the changes I would consider for ten thousand concurrent
+
+7
+00:00:37,067 --> 00:00:37,533
+coaches.
+
+8
+00:00:38,850 --> 00:00:45,066
+I chose NestJS for clear module boundaries and dependency injection.
+
+9
+00:00:45,066 --> 00:00:49,733
+Controllers handle HTTP requests.
+
+10
+00:00:49,733 --> 00:00:52,933
+Zod validates input.
+
+11
+00:00:52,933 --> 00:01:00,833
+Services coordinate business operations, and repositories contain parameterized SQL.
+
+12
+00:01:02,225 --> 00:01:10,425
+PostgreSQL gives this API transactions, relational constraints, and reliable aggregation.
+
+13
+00:01:10,425 --> 00:01:17,358
+I use the pg driver directly, so the transaction boundaries and query plans
+
+14
+00:01:17,358 --> 00:01:18,425
+remain visible.
+
+15
+00:01:19,808 --> 00:01:23,308
+The main relationship is simple.
+
+16
+00:01:23,308 --> 00:01:29,624
+Each workout entry belongs to a user identifier and an exercise.
+
+17
+00:01:29,624 --> 00:01:33,474
+Each entry contains ordered sets.
+
+18
+00:01:33,474 --> 00:01:40,563
+A set stores repetitions, the original weight and unit, and a normalized kilogram
+
+19
+00:01:40,563 --> 00:01:41,108
+value.
+
+20
+00:01:42,475 --> 00:01:47,675
+Exercises and muscle groups have a separate mapping table.
+
+21
+00:01:47,675 --> 00:01:52,925
+This keeps muscle group metadata outside business logic.
+
+22
+00:01:52,925 --> 00:01:59,508
+There is no users table or authentication in the assignment implementation.
+
+23
+00:02:00,892 --> 00:02:07,592
+For history, an index begins with user ID, then workout time and entry
+
+24
+00:02:07,592 --> 00:02:08,058
+ID.
+
+25
+00:02:08,058 --> 00:02:12,942
+A second index also includes exercise ID.
+
+26
+00:02:12,942 --> 00:02:18,092
+These support filtering and stable cursor pagination.
+
+27
+00:02:19,475 --> 00:02:23,041
+Weight conversion is centralized.
+
+28
+00:02:23,041 --> 00:02:29,541
+One pound equals zero point four five three five nine two three seven
+
+29
+00:02:29,541 --> 00:02:30,041
+kilograms.
+
+30
+00:02:30,041 --> 00:02:37,925
+Database numeric values and decimal arithmetic avoid binary floating point calculations.
+
+31
+00:02:37,925 --> 00:02:43,158
+Display values are rounded only at the response boundary.
+
+32
+00:02:44,558 --> 00:02:48,008
+Timestamps use UTC.
+
+33
+00:02:48,008 --> 00:02:52,924
+A date range includes its start and excludes its end.
+
+34
+00:02:52,924 --> 00:02:58,441
+This lets adjacent months meet without counting the boundary twice.
+
+35
+00:02:59,808 --> 00:03:04,591
+CSV processing runs in a separate worker.
+
+36
+00:03:04,591 --> 00:03:12,082
+PostgreSQL stores its jobs and progress, so recovery does not depend on API
+
+37
+00:03:12,082 --> 00:03:12,658
+memory.
+
+38
+00:03:14,017 --> 00:03:19,600
+I chose this approach to keep the assignment operationally simple.
+
+39
+00:03:19,600 --> 00:03:26,455
+It still introduces storage and memory costs, which I will discuss when covering
+
+40
+00:03:26,455 --> 00:03:26,983
+scale.
+
+41
+00:03:28,350 --> 00:03:33,566
+First, the health endpoint checks database connectivity.
+
+42
+00:03:33,566 --> 00:03:39,366
+A healthy response does not prove that the import worker is running.
+
+43
+00:03:40,767 --> 00:03:47,717
+Next, the exercise catalog supports pagination and a muscle group filter.
+
+44
+00:03:47,717 --> 00:03:54,933
+Workout logging resolves names against this catalog and rejects unknown exercises.
+
+45
+00:03:56,308 --> 00:04:01,341
+This single request records Bench Press in January.
+
+46
+00:04:01,341 --> 00:04:07,704
+It contains one set at sixty kilograms for eight repetitions, and another at
+
+47
+00:04:07,704 --> 00:04:10,641
+one hundred pounds for five repetitions.
+
+48
+00:04:10,641 --> 00:04:16,808
+The response preserves the original values and includes normalized weights.
+
+49
+00:04:18,183 --> 00:04:23,316
+Every JSON write requires an idempotency key.
+
+50
+00:04:23,316 --> 00:04:28,516
+I now send exactly the same request with the same key.
+
+51
+00:04:28,516 --> 00:04:35,283
+The API returns the original result, including the same entry ID.
+
+52
+00:04:36,642 --> 00:04:41,258
+Next, I change the payload but keep that key.
+
+53
+00:04:41,258 --> 00:04:45,008
+The API returns a conflict.
+
+54
+00:04:45,008 --> 00:04:50,275
+It cannot silently change what an earlier request meant.
+
+55
+00:04:51,642 --> 00:04:57,608
+This bulk request records February Bench Press and Squat together.
+
+56
+00:04:57,608 --> 00:05:02,025
+Both entries share one database transaction.
+
+57
+00:05:02,025 --> 00:05:07,175
+If any entry fails, the entire request rolls back.
+
+58
+00:05:08,558 --> 00:05:13,774
+The retry reservation and workout data commit together.
+
+59
+00:05:13,774 --> 00:05:21,391
+A database unique constraint coordinates requests even across separate API processes.
+
+60
+00:05:21,391 --> 00:05:26,441
+A different key intentionally represents a new submission.
+
+61
+00:05:26,441 --> 00:05:32,874
+The same exercise and timestamp alone are not enough to identify a retry.
+
+62
+00:05:34,267 --> 00:05:40,167
+The response comparison is based on status and JSON content.
+
+63
+00:05:40,167 --> 00:05:45,167
+It does not require identical object-key ordering.
+
+64
+00:05:45,167 --> 00:05:52,138
+This matters because PostgreSQL stores the response as JSONB, which can reorder keys
+
+65
+00:05:52,138 --> 00:05:54,283
+without changing their meaning.
+
+66
+00:05:55,683 --> 00:06:03,669
+History supports an exercise name substring, muscle group, date range, and requested output
+
+67
+00:06:03,669 --> 00:06:04,233
+unit.
+
+68
+00:06:04,233 --> 00:06:10,316
+Here, the stored mixed units are returned consistently in pounds.
+
+69
+00:06:10,316 --> 00:06:16,466
+The cursor continues after the last entry using both time and ID.
+
+70
+00:06:17,850 --> 00:06:23,000
+Personal records select three winners independently.
+
+71
+00:06:23,000 --> 00:06:30,413
+They are the heaviest set, highest volume set, and best estimated one repetition
+
+72
+00:06:30,413 --> 00:06:30,983
+maximum.
+
+73
+00:06:30,983 --> 00:06:35,183
+Each result includes when it was achieved.
+
+74
+00:06:36,558 --> 00:06:43,673
+For this fixture, February Bench Press wins all three: seventy kilograms, five hundred
+
+75
+00:06:43,673 --> 00:06:50,241
+sixty kilogram repetitions, and about eighty-eight point six six six seven kilograms.
+
+76
+00:06:51,558 --> 00:06:58,085
+Compared with January, the increases are ten, eighty, and about twelve point six
+
+77
+00:06:58,085 --> 00:06:59,541
+six six seven.
+
+78
+00:06:59,541 --> 00:07:03,841
+The difference is comparison minus baseline.
+
+79
+00:07:05,225 --> 00:07:10,791
+An empty history range returns a successful empty result.
+
+80
+00:07:10,791 --> 00:07:19,625
+Invalid units, missing dates, negative values, and empty sets return structured validation errors.
+
+81
+00:07:19,625 --> 00:07:26,225
+Each error includes a request ID, without exposing database internals.
+
+82
+00:07:27,600 --> 00:07:32,333
+The CSV API accepts one row per set.
+
+83
+00:07:32,333 --> 00:07:39,019
+This small file uses a separate user to keep the earlier record example
+
+84
+00:07:39,019 --> 00:07:39,533
+unchanged.
+
+85
+00:07:40,933 --> 00:07:46,349
+Upload returns an accepted response and an import ID.
+
+86
+00:07:46,349 --> 00:07:51,983
+I use the status endpoint to follow that job until completion.
+
+87
+00:07:53,350 --> 00:07:58,633
+The worker validates the whole file before writing workouts.
+
+88
+00:07:58,633 --> 00:08:03,016
+Invalid input therefore creates no workouts.
+
+89
+00:08:03,016 --> 00:08:08,016
+Valid files are then applied in bounded transactions.
+
+90
+00:08:09,392 --> 00:08:14,275
+Each batch commits its workouts and progress together.
+
+91
+00:08:14,275 --> 00:08:18,625
+A restart can continue from that checkpoint.
+
+92
+00:08:18,625 --> 00:08:24,925
+However, a later permanent failure can leave earlier committed batches.
+
+93
+00:08:24,925 --> 00:08:32,492
+CSV import therefore has different atomicity from a single JSON bulk request.
+
+94
+00:08:33,850 --> 00:08:37,766
+Codex was my main coding assistant.
+
+95
+00:08:37,766 --> 00:08:45,233
+I used it for design, implementation, testing, debugging, and documentation.
+
+96
+00:08:45,233 --> 00:08:52,583
+My responsibility was to supply context, make decisions, and review the result.
+
+97
+00:08:53,975 --> 00:09:02,208
+Before implementation, I organized project rules in AGENTS dot md, workflow documents, and
+
+98
+00:09:02,208 --> 00:09:03,425
+coding standards.
+
+99
+00:09:03,425 --> 00:09:12,641
+Task-specific skills supplied guidance for NestJS, PostgreSQL, validation, security, and review.
+
+100
+00:09:14,017 --> 00:09:21,383
+My prompts included the assignment, the approved design, the current phase, and its
+
+101
+00:09:21,383 --> 00:09:21,900
+boundaries.
+
+102
+00:09:21,900 --> 00:09:27,683
+I settled important decisions before asking for implementation.
+
+103
+00:09:27,683 --> 00:09:35,033
+Examples included atomic bulk writes, UTC periods, and retry behavior.
+
+104
+00:09:36,392 --> 00:09:43,731
+I split work into phases and delegated bounded tasks, such as database tests
+
+105
+00:09:43,731 --> 00:09:45,375
+and benchmark verification.
+
+106
+00:09:45,375 --> 00:09:49,892
+A separate reviewer checked the source and tests.
+
+107
+00:09:49,892 --> 00:09:55,958
+The tracked code and reports are the durable evidence because local plans are
+
+108
+00:09:55,958 --> 00:09:57,358
+excluded from Git.
+
+109
+00:09:58,725 --> 00:10:03,475
+The workflow log records two useful corrections.
+
+110
+00:10:03,475 --> 00:10:11,475
+First, JavaScript and PostgreSQL normalized some Unicode exercise names differently.
+
+111
+00:10:11,475 --> 00:10:16,258
+Ordinary English names did not reveal this problem.
+
+112
+00:10:16,258 --> 00:10:21,879
+A name beginning with Turkish capital I with a dot could behave differently
+
+113
+00:10:21,879 --> 00:10:23,608
+across the two layers.
+
+114
+00:10:25,017 --> 00:10:33,172
+The correction made application normalization authoritative and added a migration to backfill existing
+
+115
+00:10:33,172 --> 00:10:33,750
+values.
+
+116
+00:10:33,750 --> 00:10:39,050
+The database regression includes Turkish I and Greek sigma.
+
+117
+00:10:39,050 --> 00:10:46,272
+This test checks the actual database behavior rather than assuming two lowercase functions
+
+118
+00:10:46,272 --> 00:10:47,383
+are equivalent.
+
+119
+00:10:48,767 --> 00:10:55,950
+Second, a checked-out PostgreSQL connection could disconnect and crash the process.
+
+120
+00:10:55,950 --> 00:11:02,434
+The pool listener covered idle clients, but an active client needed its own
+
+121
+00:11:02,434 --> 00:11:02,933
+listener.
+
+122
+00:11:04,308 --> 00:11:10,174
+The fix adds a scoped error listener and discards a damaged client.
+
+123
+00:11:10,174 --> 00:11:16,634
+The integration test terminates its own database connection and checks that a later
+
+124
+00:11:16,634 --> 00:11:18,124
+query still works.
+
+125
+00:11:18,124 --> 00:11:24,058
+That is a concrete failure scenario, not just a mocked rejection.
+
+126
+00:11:25,433 --> 00:11:31,116
+I also rejected treating retries as independent submissions.
+
+127
+00:11:31,116 --> 00:11:36,916
+A network timeout does not tell the caller whether the server committed.
+
+128
+00:11:36,916 --> 00:11:41,299
+Retrying must not create a second workout.
+
+129
+00:11:41,299 --> 00:11:47,533
+That decision led to the required idempotency key and stored response.
+
+130
+00:11:48,933 --> 00:11:55,585
+These examples show the review loop: identify a risk, reproduce it, correct the
+
+131
+00:11:55,585 --> 00:11:59,116
+design or code, and verify the behavior.
+
+132
+00:11:59,116 --> 00:12:04,966
+I do not claim that every test existed before its implementation.
+
+133
+00:12:04,966 --> 00:12:09,766
+The workflow log makes that limitation explicit.
+
+134
+00:12:11,142 --> 00:12:16,242
+I also checked the quality of the verification itself.
+
+135
+00:12:16,242 --> 00:12:21,958
+Comparing only row counts could miss wrong weights or user ownership.
+
+136
+00:12:21,958 --> 00:12:29,108
+The improved checks read stored values through a separate database client and use
+
+137
+00:12:29,108 --> 00:12:30,208
+independent arithmetic.
+
+138
+00:12:30,208 --> 00:12:37,188
+The verifier includes deliberate corruption cases to show that it can detect incorrect
+
+139
+00:12:37,188 --> 00:12:37,725
+data.
+
+140
+00:12:39,142 --> 00:12:43,625
+This complete file handles record arithmetic.
+
+141
+00:12:43,625 --> 00:12:47,092
+Line one imports Decimal.
+
+142
+00:12:47,092 --> 00:12:52,225
+Line two imports the metric and database winner types.
+
+143
+00:12:52,225 --> 00:12:59,280
+Lines four to seven create a dedicated Decimal constructor with fifty significant digits
+
+144
+00:12:59,280 --> 00:13:00,908
+and half-up rounding.
+
+145
+00:13:00,908 --> 00:13:06,208
+This keeps arithmetic settings local to these calculations.
+
+146
+00:13:07,600 --> 00:13:11,033
+Line eight defines set volume.
+
+147
+00:13:11,033 --> 00:13:16,683
+Weight arrives as a string to preserve the database decimal value.
+
+148
+00:13:16,683 --> 00:13:22,950
+Line nine multiplies weight by repetitions and returns a decimal string.
+
+149
+00:13:22,950 --> 00:13:30,250
+Sixty kilograms for eight repetitions gives four hundred eighty kilogram repetitions.
+
+150
+00:13:30,250 --> 00:13:33,700
+Line ten closes the function.
+
+151
+00:13:35,058 --> 00:13:39,691
+The next function calculates the Epley estimate.
+
+152
+00:13:39,691 --> 00:13:43,608
+Line twelve creates the decimal weight.
+
+153
+00:13:43,608 --> 00:13:48,874
+Line thirteen multiplies by thirty plus repetitions.
+
+154
+00:13:48,874 --> 00:13:52,558
+Line fourteen divides by thirty.
+
+155
+00:13:52,558 --> 00:13:59,012
+This is the same formula as weight times one plus repetitions divided by
+
+156
+00:13:59,012 --> 00:13:59,508
+thirty.
+
+157
+00:13:59,508 --> 00:14:05,774
+Line fifteen returns the string, and line sixteen closes the function.
+
+158
+00:14:07,183 --> 00:14:12,249
+This private helper builds a numerator for each metric.
+
+159
+00:14:12,249 --> 00:14:19,147
+Lines eighteen to twenty-three choose one for heaviest weight, repetitions for volume, or
+
+160
+00:14:19,147 --> 00:14:21,799
+thirty plus repetitions for Epley.
+
+161
+00:14:21,799 --> 00:14:27,199
+Line twenty-four multiplies that value by normalized weight.
+
+162
+00:14:27,199 --> 00:14:31,566
+Epley division is deliberately postponed.
+
+163
+00:14:31,566 --> 00:14:35,366
+Line twenty-five closes the helper.
+
+164
+00:14:36,767 --> 00:14:41,500
+The next function returns a winner's actual value.
+
+165
+00:14:41,500 --> 00:14:46,050
+Lines twenty-seven and twenty-eight handle volume.
+
+166
+00:14:46,050 --> 00:14:50,233
+Lines twenty-nine and thirty handle Epley.
+
+167
+00:14:50,233 --> 00:14:56,1000
+Line thirty-one returns the original normalized weight for the heaviest-set metric.
+
+168
+00:14:56,1000 --> 00:15:00,833
+Line thirty-two closes the function.
+
+169
+00:15:02,225 --> 00:15:07,358
+Finally, this function accepts a metric and two winners.
+
+170
+00:15:07,358 --> 00:15:13,808
+The comment explains why subtraction happens before division or display rounding.
+
+171
+00:15:13,808 --> 00:15:20,608
+Line thirty-nine subtracts the baseline numerator from the comparison numerator.
+
+172
+00:15:20,608 --> 00:15:26,790
+Lines forty to forty-two divide only an Epley difference by thirty, then return
+
+173
+00:15:26,790 --> 00:15:27,741
+a string.
+
+174
+00:15:27,741 --> 00:15:31,575
+Line forty-three closes the function.
+
+175
+00:15:32,975 --> 00:15:37,475
+Winner selection happens in SQL elsewhere.
+
+176
+00:15:37,475 --> 00:15:42,358
+This file only calculates values and differences.
+
+177
+00:15:42,358 --> 00:15:48,341
+Keeping those responsibilities separate makes each easier to test.
+
+178
+00:15:49,725 --> 00:15:56,167
+For our monthly example, the volume difference is five hundred sixty minus four
+
+179
+00:15:56,167 --> 00:15:57,108
+hundred eighty.
+
+180
+00:15:57,108 --> 00:16:00,008
+The result is eighty.
+
+181
+00:16:00,008 --> 00:16:07,923
+Rounding earlier intermediate values could produce a different comparison, so final display formatting
+
+182
+00:16:07,923 --> 00:16:09,141
+happens later.
+
+183
+00:16:10,517 --> 00:16:17,417
+The repository contains unit tests and real PostgreSQL integration tests.
+
+184
+00:16:17,417 --> 00:16:26,650
+They cover calculations, validation, rollback, retries, concurrent requests, and worker recovery.
+
+185
+00:16:28,017 --> 00:16:35,167
+The workflow log records three hundred eighty-six unit tests and two hundred eighty-five
+
+186
+00:16:35,167 --> 00:16:36,767
+integration tests passing.
+
+187
+00:16:36,767 --> 00:16:43,967
+These are documented historical results, not a fresh test run during this video.
+
+188
+00:16:45,350 --> 00:16:52,066
+Performance reports use fifty thousand entries and one hundred fifty thousand sets.
+
+189
+00:16:52,066 --> 00:17:00,112
+After query improvements, the recorded all-time records p ninety-five was about one hundred
+
+190
+00:17:00,112 --> 00:17:01,350
+thirty-one milliseconds.
+
+191
+00:17:01,350 --> 00:17:07,216
+An independent integer-arithmetic oracle checked the responses.
+
+192
+00:17:08,600 --> 00:17:14,450
+Those measurements came from a local environment at concurrency one.
+
+193
+00:17:14,450 --> 00:17:18,383
+They demonstrate the tested workload.
+
+194
+00:17:18,383 --> 00:17:23,966
+They do not prove production capacity for ten thousand coaches.
+
+195
+00:17:25,350 --> 00:17:31,283
+For ten thousand concurrent coaches, I would first define the workload.
+
+196
+00:17:31,283 --> 00:17:36,616
+Connected users are not the same as requests per second.
+
+197
+00:17:36,616 --> 00:17:43,457
+I need the read and write mix, burst size, import volume, and acceptable
+
+198
+00:17:43,457 --> 00:17:43,983
+latency.
+
+199
+00:17:45,350 --> 00:17:49,616
+The API can run multiple replicas.
+
+200
+00:17:49,616 --> 00:17:56,483
+Their combined database connection pools must remain within database capacity.
+
+201
+00:17:56,483 --> 00:18:04,427
+I would measure pool saturation, lock waits, database CPU and input-output, and request
+
+202
+00:18:04,427 --> 00:18:07,483
+latency before choosing infrastructure size.
+
+203
+00:18:08,850 --> 00:18:15,650
+I would add authentication and tenant authorization before serving real client data.
+
+204
+00:18:15,650 --> 00:18:22,490
+A user ID in a URL currently selects data; it does not establish
+
+205
+00:18:22,490 --> 00:18:23,016
+permission.
+
+206
+00:18:24,392 --> 00:18:29,375
+Imports need admission limits and worker supervision.
+
+207
+00:18:29,375 --> 00:18:34,375
+The current design allows one worker per database.
+
+208
+00:18:34,375 --> 00:18:40,275
+Multiple workers would require a tested claim and lease protocol.
+
+209
+00:18:40,275 --> 00:18:46,475
+Retry keys and job metadata also need an agreed retention policy.
+
+210
+00:18:47,850 --> 00:18:54,183
+I would tune measured query bottlenecks before adding caches or read replicas.
+
+211
+00:18:54,183 --> 00:19:00,650
+Those additions need explicit freshness rules for recent workouts and records.
+
+212
+00:19:02,017 --> 00:19:07,650
+I would then load test the expected traffic and failure scenarios against agreed
+
+213
+00:19:07,650 --> 00:19:13,283
+latency and error budgets, and use those results to guide the next change.
+
+214
+00:19:14,600 --> 00:19:21,566
+The implementation covers the assignment workflow, while these limits remain visible.
+
+215
+00:19:21,566 --> 00:19:24,333
+Thank you for watching.
